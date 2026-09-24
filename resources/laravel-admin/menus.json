@@ -1,0 +1,35 @@
+{
+    "menus": [{
+        "section": "Modules",
+        "items": [
+            {
+                "title": "Dashboard",
+                "display": "Dashboard",
+                "icon": "mdi mdi-view-dashboard",
+                "url": "\/",
+                "branch_block": "0"
+            },
+            {
+                "title": "agent",
+                "display": "มอบสิทธิ์เข้าใช้งานระบบ",
+                "icon": "mdi mdi-share-variant",
+                "url": "\/agents",
+                "branch_block": "1"
+            },
+            {
+                "title": "authorizess",
+                "display": "รับมอบสิทธิ์เข้าใช้งานระบบ",
+                "icon": "mdi mdi-newspaper",
+                "url": "\/confirm-agents",
+                "branch_block": "0"
+            },
+            {
+                "title": "counsels",
+                "display": "ข้อเสนอแนะ",
+                "icon": "fa fa-commenting-o",
+                "url": "\/counsels",
+                "branch_block": "0"
+            }
+        ]
+    }]
+}

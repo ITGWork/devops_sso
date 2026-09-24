@@ -1,0 +1,155 @@
+@extends('layouts.master')
+
+@section('title', 'ยกเลิก มอก. ที่ได้รับการแต่งตั้ง')
+
+@push('css')
+    <link href="{{asset('plugins/components/datatables/jquery.dataTables.min.css')}}" rel="stylesheet" type="text/css"/>
+    <link href="https://cdn.datatables.net/buttons/1.2.2/css/buttons.dataTables.min.css" rel="stylesheet" type="text/css"/>
+    <link rel="stylesheet" href="{{asset('plugins/components/toast-master/css/jquery.toast.css')}}">
+@endpush
+
+@section('content')
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-sm-12 col-md-12">
+                <div class="white-box">
+                    <h3 class="box-title pull-left">
+                        ยกเลิก มอก. ที่ได้รับการแต่งตั้ง
+                    </h3>
+
+                    {{-- <div class="pull-right">&nbsp;</div> --}}
+
+                    <div class="clearfix"></div>
+                    <hr>
+
+                    <div class="row box_filter">
+                        <div class="col-md-6">
+                            {!! Form::label('filter_search', 'คำค้นหา:', ['class' => 'col-md-2 control-label label-filter']) !!}
+                            <div class="form-group col-md-10">
+                                {!! Form::text('filter_search', null, ['class' => 'form-control', 'placeholder'=>'ค้นหาจาก เลขที่คำขอ/ผู้ยื่นคำขอ/เลขผู้เสียภาษี']); !!}
+                            </div>
+                        </div>
+
+                        <div class="col-md-2">
+                            <div class="form-group  pull-left">
+                                <button type="button" class="btn btn-info waves-effect waves-light" style="margin-bottom: -1px;" id="btn_filter_search">ค้นหา</button>
+                            </div>
+
+                            <div class="form-group  pull-left m-l-15">
+                                <button type="button" class="btn btn-warning waves-effect waves-light" id="btn_filter_clear"> ล้าง </button>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <div class="clearfix"></div>
+                    <hr>
+
+                    <div class="table-responsive">
+                        <table class="table table-borderless" id="myTable">
+                            <thead>
+                                <tr>
+                                    <th class="text-center">ลำดับ</th>
+                                    <th class="text-center">เลข มอก. ที่ได้รับ</th>
+                                    <th class="text-center">ข้อมูลประกาศราชกิจจา</th>
+                                    <th class="text-center">จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+
+                            </tbody>
+                        </table>
+                        <div class="pagination-wrapper">
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+@endsection
+
+@push('js')
+    <script src="{{asset('plugins/components/toast-master/js/jquery.toast.js')}}"></script>
+
+    <script src="{{asset('plugins/components/datatables/jquery.dataTables.min.js')}}"></script>
+
+    <script>
+        $(document).ready(function () {
+            @if(\Session::has('message'))
+                $.toast({
+                    heading: 'Success!',
+                    position: 'top-center',
+                    text: '{{session()->get('message')}}',
+                    loaderBg: '#ff6849',
+                    icon: 'success',
+                    hideAfter: 3000,
+                    stack: 6
+                });
+            @endif
+
+            @if(\Session::has('flash_message'))
+                Swal.fire({
+                    type: 'success',
+                    title: 'บันทึกเรียบร้อย',
+                    // html: '<p class="h4"></p>',
+                    width: 500
+                });
+            @endif
+
+            @if(\Session::has('flash_message_delete'))
+                Swal.fire({
+                    type: 'success',
+                    title: 'ลบคำขอเรียบร้อย',
+                    // html: '<p class="h4"></p>',
+                    width: 500
+                });
+            @endif
+        });
+
+        $(function () {
+            // Create DataTable
+            var table = $('#myTable').DataTable({
+                processing: true,
+                serverSide: true,
+                searching: false,
+                stateSave: false,
+                ajax: {
+                    "url": '{!! url('/request-section-5/application-lab/cancellation/data_list') !!}',
+                    "dataType": "json",
+                    "data": function(d) {
+                        d.filter_search = $('#filter_search').val();
+                    },
+                    "error": function(xhr, error, thrown) {
+                        console.error('DataTable AJAX Error:', xhr.status, xhr.responseText);
+                        alert('Error ' + xhr.status + ': ' + xhr.responseText.substring(0, 300));
+                    }
+                },
+                columns: [
+                    { data: 'DT_Row_Index', searchable: false, orderable: false },
+                    { data: 'application_no', name: 'application_no' },
+                    { data: 'gazette', name: 'gazette', searchable: false, orderable: false },
+                    { data: 'manage', name: 'manage', searchable: false, orderable: false },
+                ],
+                columnDefs: [
+                    { className: "text-top", targets:[0,1,2,3] },
+                ],
+                drawCallback: function(settings) {
+                    var api = this.api();
+                    console.log('DataTable drew. Total records:', settings._iRecordsTotal, '| Displayed:', api.rows().count());
+                    console.log('Raw data sample:', api.rows().data().toArray().slice(0, 2));
+                },
+            });
+
+            $('#btn_filter_search').click(function (e) {
+                table.draw();
+            });
+
+            $('#btn_filter_clear').click(function (e) {
+                $('#filter_search').val('');
+                table.draw();
+            });
+        });
+    </script>
+
+@endpush

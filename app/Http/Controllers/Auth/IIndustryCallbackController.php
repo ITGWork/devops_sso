@@ -1,0 +1,752 @@
+<?php
+//Kantapon 29/9/2568
+namespace App\Http\Controllers\Auth;
+
+use Illuminate\Http\Request;
+use App\Http\Controllers\Controller;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Session;
+// use Illuminate\Support\Facades\Http; // อนุญาตให้คงไว้ได้ แต่จะไม่เรียกตรง ๆ
+use Carbon\Carbon;
+use App\User;
+use Cookie;
+use HP;
+
+class IIndustryCallbackController extends Controller
+{   
+    public function handle(\Illuminate\Http\Request $request)
+    {
+        // 1) Resolve uid/aid from cookie (root = null → cookie path only)
+        list($uid, $aid) = $this->resolveUidAid($request, null);
+
+        // เลิกใช้ progid/moi_prog แล้ว (ดู docs/bugsso.md ข้อ 17) - ทีม ASP ส่งคุกกี้ "appname"
+        // มาตรงๆ แทน (Domain=.tisi.go.th, ยืนยันแล้วว่าแชร์ทุก subdomain) เอาไปหาปลายทางใน
+        // ตาราง setting_systems (WHERE app_name = ?) แทน moi_prog (WHERE progid = ?) เดิม
+        $appName = $this->resolveAppName($request);
+
+        // เคลียร์คุกกี้ "i-industry" ทิ้งทันทีที่อ่านค่ามาใช้แล้ว (Domain=.tisi.go.th ครอบ
+        // ทุก subdomain รวมแอปเรา จึงมีสิทธิ์ลบทับได้) - ป้องกันปัญหา: ถ้าคุกกี้นี้ยังค้างอยู่ใน
+        // เบราว์เซอร์ ครั้งถัดไปที่ผู้ใช้กลับไปกด login ที่ i-industry ใหม่ (แม้เลือกปุ่ม/prog
+        // คนละตัว) ฝั่ง i-industry จะเห็นคุกกี้เก่ายังไม่หมดอายุ แล้ว "จำ" session/aid เดิมกลับมา
+        // ให้ซ้ำ ไม่สร้าง session ใหม่ตามที่เพิ่งเลือก ทำให้ auto-login ผิด progid (พบจริงจาก log
+        // ทดสอบ - อาการหายไปเองถ้าเปลี่ยนเบราว์เซอร์/ล้างคุกกี้นี้ก่อน ยืนยันว่าคุกกี้ค้างคือสาเหตุ)
+        //
+        // ปิดการเรียกใช้ไว้ถาวร: ยืนยันแล้วว่าลบคุกกี้เร็วเกินไปทำให้ autofill/auto-login
+        // ใช้ได้แค่ 1 ครั้งต่อการ login จริง 1 ครั้ง (refresh หน้า/เข้าซ้ำแล้ว uid/aid กลาย
+        // เป็น null หมด) ดูรายละเอียดที่ docs/bugsso.md ข้อ 6 - ห้ามเปิดกลับมาใช้ตรงๆ แบบนี้
+        // อีกจนกว่าจะแก้ให้ลบเฉพาะตอน progid เปลี่ยนจริงเท่านั้น ไม่ใช่ลบทุกครั้ง
+        // $this->forgetIIndustryCookie();
+
+        // 2) Call LoginIndust.asp and get raw XML (even if <Return>False</Return>)
+        $loginUrl = trim((string) env('TISI_LOGIN_URL', ''), " \t\n\r"); // e.g. https://www4.tisi.go.th/moiapitest/LoginIndust.asp
+        $xml      = $this->fetchLoginXml($loginUrl, (string) $uid, (string) $aid);
+
+        // 3) Parse XML to DOM (tolerant) for downstream extraction
+        $root = null;
+        $dom  = null;
+        if ($xml !== '') {
+            $dom = new \DOMDocument('1.0', 'UTF-8');
+            @$dom->loadXML($xml);
+            if ($dom->documentElement instanceof \DOMElement) {
+                $root = $dom->documentElement;
+            }
+        }
+    
+        // Re-run resolver with XML fallback (keeps your old behavior)
+        if (!$uid || !$aid) {
+            list($uid, $aid) = $this->resolveUidAid($request, $root);
+        }
+    
+        // Parse the rest of fields that the snapshot needs (iCustomer, tax, etc.)
+        // NOTE: We'll override bid/jt/progid below with values pulled straight from $xml.
+        $parsed = $this->parseIIndustryXml($root);  // ['uid','bid','jt','progid','tax_number','iCustomer']
+    
+        // Prefer cookie uid if present; otherwise use XML's
+        $finalUid = $uid ?: (isset($parsed['uid']) ? $parsed['uid'] : null);
+    
+        // --- Pull bid / jt / prog directly from XML (independent of parseIIndustryXml) ---
+        $bidFromXml  = null;
+        $jtFromOwner = null;
+        $progFromXml = null;
+    
+        if ($root instanceof \DOMElement) {
+            $xp = new \DOMXPath($root->ownerDocument);
+    
+            // Helper for case-insensitive tag lookup
+            $q = function(string $local) use ($xp) {
+                return $xp->query("//*[translate(local-name(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')='{$local}']")->item(0);
+            };
+    
+            // 1) bid — authoritative from <bid>
+            $nBid = $q('bid');
+            if ($nBid instanceof \DOMElement) {
+                $bidFromXml = preg_replace('/\D+/', '', trim($nBid->textContent)) ?: null;
+            }
+    
+            // 2) progid — from <progid>
+            $nProg = $q('progid');
+            if ($nProg instanceof \DOMElement) {
+                $progFromXml = preg_replace('/\D+/', '', trim($nProg->textContent)) ?: null;
+            }
+    
+            // 3) jt — ONLY from <iOwner> JSON
+            $nOwner = $q('iowner');
+            if ($nOwner instanceof \DOMElement) {
+                $raw  = trim($nOwner->textContent ?? '');
+                if ($raw !== '') {
+                    $json = html_entity_decode($raw, ENT_QUOTES | ENT_XML1, 'UTF-8');
+                    $obj  = json_decode($json, true);
+                    if (!is_array($obj) && strpos($json, '\\') !== false) {
+                        $obj = json_decode(stripslashes($json), true);
+                    }
+                    if (is_array($obj)) {
+                        // If there is a JuristicList, pick the entry whose JuristicID equals <bid>
+                        if (isset($obj['JuristicList']) && is_array($obj['JuristicList']) && $bidFromXml) {
+                            $bidDigits = $bidFromXml;
+                            foreach ($obj['JuristicList'] as $row) {
+                                if (!is_array($row)) continue;
+                                $rowBid = isset($row['JuristicID']) ? preg_replace('/\D+/', '', (string)$row['JuristicID']) : null;
+                                if ($rowBid !== null && $rowBid === $bidDigits) {
+                                    $jtRaw = $row['JuristicType'] ?? null;
+                                    if ($jtRaw !== null) {
+                                        $jtFromOwner = preg_replace('/\D+/', '', (string)$jtRaw) ?: null;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+    
+                        // If no list or no match, accept flat JuristicType if present
+                        if ($jtFromOwner === null && isset($obj['JuristicType'])) {
+                            $jtFromOwner = preg_replace('/\D+/', '', (string)$obj['JuristicType']) ?: null;
+                        }
+                    }
+                }
+            }
+        }
+    
+        // Overwrite with truth derived directly from $xml (uid untouched)
+        if ($bidFromXml !== null)  $parsed['bid']    = $bidFromXml;
+        if ($jtFromOwner !== null) $parsed['jt']     = $jtFromOwner;
+        if ($progFromXml !== null) $parsed['progid'] = $progFromXml;
+
+        // DEBUG-TEMP: pattern เดียวกับ ThaiDCallbackController::handle() - ดู storage/logs/laravel.log
+        // กรองด้วย tag '[iindustry][DEBUG-TEMP]' ลบทิ้งพร้อมกับ debugHeaders() หลังเลิกใช้งาน
+        Log::debug('[iindustry][DEBUG-TEMP] handle() real request', [
+            'cookie_raw'   => $request->cookie('i-industry') ?? $request->cookie('i%2Dindustry'),
+            'appname_raw'  => $request->cookie('appname'),
+            'uid'          => $uid,
+            'aid'          => $aid,
+            'appName'      => $appName,
+            'finalUid'     => $finalUid,
+            'xml_raw'      => $xml,
+            'parsed'       => $parsed,
+        ]);
+
+        // 4) เช็คว่ามีบัญชีอยู่แล้วหรือยัง - ถ้ามี auto-login ตรงเข้าระบบปลายทางเลย
+        //    ไม่ต้องผ่านหน้า register (bid ก่อน, fallback ไป uid ตาม pattern เดียวกับฝั่ง client)
+        $taxNumber = $parsed['bid'] ?? $finalUid;
+
+        // app_name รอบนี้ไม่ตรงกับ app_name ที่ login ค้างอยู่เดิม (เช่น auto-login เป็นระบบหนึ่ง
+        // ไปแล้วก่อนหน้า แต่ i-industry ส่ง app_name ใหม่มา) -> เคลียร์ session/cache เก่าทิ้งก่อน
+        // เหมือนตอน logout กันไม่ให้ auto-login รอบใหม่ไปปนกับ session ของ app_name เดิม
+        if (Auth::check() && $appName !== null && session('iindustry_app_name') !== null && session('iindustry_app_name') !== $appName) {
+            HP::clearStaleAuthSession($request);
+        }
+
+        if ($taxNumber) {
+            // ต้องใช้ closure ครอบ ไม่ใช่ ->where('branch_type', '!=', 2) ตรงๆ เพราะ SQL
+            // 3-valued logic: ถ้า branch_type IS NULL การเทียบ != 2 จะได้ NULL (ไม่ใช่ TRUE)
+            // แถวนั้นจะถูกกรองทิ้งไปเงียบๆ ทั้งที่ tax_number ตรง (พบจริงกับ user สมัครถูกต้อง
+            // แล้วด้วย ไม่ใช่แค่ record broken - ดู docs/bugsso.md ข้อ 19)
+            $existing = User::where('tax_number', $taxNumber)
+                ->where(function ($q) {
+                    $q->where('branch_type', '!=', 2)->orWhereNull('branch_type');
+                })
+                ->first();
+            $debugData = [
+                'tax-number' => $taxNumber,
+                'app-name'   => (string) $appName,
+                'found'      => $existing ? 'true' : 'false',
+                'user-id'    => $existing->id ?? 'null',
+                'branch-type'=> $existing->branch_type ?? 'null',
+                'db-host'    => config('database.connections.' . config('database.default') . '.host'),
+                'db-name'    => config('database.connections.' . config('database.default') . '.database'),
+            ];
+
+            if ($existing) {
+                // อัปเดตเวลา login ล่าสุดผ่าน i-industry ทุกครั้งที่ auto-login สำเร็จ
+                // (เดิมเซ็ตแค่ตอนสมัครสมาชิกใหม่ครั้งแรกใน RegisterController เท่านั้น)
+                $existing->i_industry_lastlogin = date('Y-m-d H:i:s');
+                $existing->save();
+
+                // จำ app_name ของ session ที่กำลัง login เข้าไว้ เทียบกับรอบถัดไปว่าเปลี่ยนไปไหม
+                session()->put('iindustry_app_name', $appName);
+                session()->save();
+
+                // login + ตั้ง cookie session_id เสมอ (ฟังก์ชันนี้ไม่คืนค่า null อีกแล้ว
+                // แม้ app_name จะไม่ตรง mapping ใดๆ ใน setting_systems ก็ยัง login ให้ แค่พาไปหน้าแรกแทน)
+                // checkApiData=true: เช็คสถานะกับ API กลาง (DBD/DOPA/RD) เหมือน manual login ทุกประการ
+                $response = HP::loginAndRedirectByAppName($existing, $appName, false, true);
+                return $this->debugHeaders($response, $request, $debugData + ['result' => 'existing-user-login']);
+            }
+        }
+
+        // 5) ยังไม่มีบัญชีตรงกับ identity ที่ i-industry ส่งมารอบนี้
+        //    ถ้าเบราว์เซอร์ยัง login ค้างเป็นคนละคน (เช่นเพิ่ง auto-login เป็นบริษัทไปก่อนหน้า
+        //    แล้ว i-industry ส่ง identity ใหม่ที่ไม่ตรงบัญชีเดิมมา) ต้อง logout ตัวเก่าออกก่อน
+        //    ไม่งั้นผู้ใช้จะยัง login ค้างเป็นคนละคนกับ identity ที่เพิ่งยืนยันตัวตนมาจริง
+        HP::clearStaleAuthSession($request);
+
+        // 6) snapshot → session → redirect ไปหน้า register
+        $response = $this->redirectToRegisterSnapshot(
+            $finalUid,
+            $parsed['bid']        ?? null,
+            $parsed['jt']         ?? null,
+            $appName
+        );
+        return $this->debugHeaders($response, $request, [
+            'tax-number' => $taxNumber,
+            'app-name'   => (string) $appName,
+            'found'      => 'false',
+            'user-id'    => 'null',
+            'result'     => 'no-account-to-register',
+        ]);
+    }
+
+    /**
+     * DEBUG-TEMP: แปะข้อมูล diagnostic ลง HTTP response header แทนการต้อง SSH เข้า server
+     * ไปอ่าน storage/logs/laravel.log - เปิด DevTools -> Network -> คลิก request
+     * /internal/iindustry-callback -> ดู Response Headers ได้เลยทุกเซิร์ฟเวอร์ ไม่ต้องมีสิทธิ์
+     * SSH เข้าเซิร์ฟเวอร์นั้นเลย - pattern เดียวกับ ThaiDCallbackController::debugHeaders()
+     * ลบทิ้งหลังเลิกใช้งาน
+     */
+    private function debugHeaders($response, Request $request, array $data)
+    {
+        $response->headers->set('X-Debug-Handled-By-Host', $request->getHost());
+        $response->headers->set('X-Debug-App-URL', (string) config('app.url'));
+        foreach ($data as $key => $value) {
+            $response->headers->set('X-Debug-' . $key, (string) $value);
+        }
+        return $response;
+    }
+
+    /**
+     * อ่านคุกกี้ "appname" (Domain=.tisi.go.th) ที่ทีม ASP ส่งมาตรงๆ แทน progid เดิม
+     * ค่าอาจเป็น URL-encoded (เช่น "e%2DLicense" แทน "e-License") ต้อง urldecode ก่อนเทียบ
+     * กับ setting_systems.app_name เสมอ - pattern เดียวกับ resolveUidAid() ที่ decode
+     * คุกกี้ "i-industry"/"i%2Dindustry"
+     */
+    private function resolveAppName(Request $request): ?string
+    {
+        $cookieHeader = (string) $request->headers->get('Cookie', '');
+
+        $raw = $request->cookie('appname');
+        if (!$raw && $cookieHeader) {
+            if (preg_match('/(?:^|;\s*)(appname)\s*=\s*([^;]+)/i', $cookieHeader, $m)) {
+                $raw = $m[2];
+            }
+        }
+
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+
+        $decoded = urldecode($raw);
+        if (strpos($decoded, '%') !== false) $decoded = urldecode($decoded);
+
+        $decoded = trim($decoded);
+        return $decoded !== '' ? $decoded : null;
+    }
+
+    /**
+     * ลบคุกกี้ "i-industry" (ทั้ง 2 รูปแบบชื่อที่เจอจริง: "i-industry" และ "i%2Dindustry")
+     * รวมถึงคุกกี้ "progid" ที่ i-industry เพิ่มมาใหม่ ทิ้งด้วย Domain=.tisi.go.th - ป้องกัน
+     * คุกกี้ค้างข้ามรอบทำให้ i-industry ไม่ยอมสร้าง session ใหม่ตอนกลับไป login ซ้ำด้วย
+     * prog/progid คนละตัว (ดูรายละเอียดที่จุดเรียกใช้)
+     */
+    private function forgetIIndustryCookie(): void
+    {
+        Cookie::queue(Cookie::forget('i-industry', null, '.tisi.go.th'));
+        Cookie::queue(Cookie::forget('i%2Dindustry', null, '.tisi.go.th'));
+        Cookie::queue(Cookie::forget('progid', null, '.tisi.go.th'));
+    }
+
+    // clearStaleAuthSession() ย้ายไปเป็น HP::clearStaleAuthSession() แล้ว (ใช้ร่วมกับ
+    // ThaiDCallbackController ได้ด้วย) - ดู app/Helpers/Helper.php
+
+
+    /**
+     * GET LoginIndust.asp?uid=&aid= and return raw XML (empty string if failed).
+     * PHP 7.2-safe; small timeouts.
+     */
+    private function fetchLoginXml($baseUrl, $uid, $aid)
+    {
+        if ($baseUrl === '' || $uid === '' || $aid === '') {
+            return '';
+        }
+    
+        $url = $baseUrl . (strpos($baseUrl, '?') !== false ? '&' : '?')
+             . http_build_query(['uid' => $uid, 'aid' => $aid]);
+    
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_MAXREDIRS, 5);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+            'Accept: application/xml,text/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language: th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7',
+            'User-Agent: Mozilla/5.0',
+        ));
+        $body = curl_exec($ch);
+        if ($body === false) {
+            curl_close($ch);
+            return '';
+        }
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($code >= 200 && $code < 300) return (string)$body;
+        return '';
+    }
+    
+    /**
+     * Your existing resolver (with tiny hardening): pulls uid/aid from cookie "1140833786676/25"ลืมตั้ง TISI_LOGIN_URL แล้ว ตอนนี้เจอปัญหาคือ login
+     * and, if needed, falls back to XML <uid> + <SessionID>.
+     */
+    private function resolveUidAid(Request $request, ?\DOMElement $root): array
+    {
+        $uid = null; $aid = null;
+    
+        $cookieHeader = (string) $request->headers->get('Cookie', '');
+
+        $rawCookie = $request->cookie('i-industry') ?? $request->cookie('i%2Dindustry');
+        if (!$rawCookie && $cookieHeader) {
+            if (preg_match('/(?:^|;\s*)(i(?:%2D|-)?industry)\s*=\s*([^;]+)/i', $cookieHeader, $m)) {
+                $rawCookie = $m[2];
+            }
+        }
+    
+        if ($rawCookie !== null && $rawCookie !== '') {
+            // trim quotes if present
+            if (strlen($rawCookie) >= 2 && ($rawCookie[0] === '"' || $rawCookie[0] === "'")) {
+                $q = $rawCookie[0];
+                if (substr($rawCookie, -1) === $q) $rawCookie = substr($rawCookie, 1, -1);
+            }
+    
+            $decoded = urldecode($rawCookie);
+            if (strpos($decoded, '%') !== false) $decoded = urldecode($decoded);
+
+            // A) slash form: "1140833786676/25"
+            $parts = explode('/', $decoded, 2);
+            if (count($parts) === 2) {
+                $uid = $this->normalize13($parts[0]) ?: null;
+                $aid = preg_replace('/\D/', '', (string) $parts[1]) ?: null;
+            } else {
+                // B) kv form: "uid=...&aid=..."
+                $kv = []; parse_str($decoded, $kv);
+                if (!empty($kv)) {
+                    $uid = $this->normalize13((string)($kv['uid'] ?? '')) ?: $uid;
+                    $aid = preg_replace('/\D/', '', (string)($kv['aid'] ?? '')) ?: $aid;
+                }
+            }
+        }
+    
+        // Fallback from XML body if needed
+        if ((!$uid || !$aid) && $root instanceof \DOMElement) {
+            $get = function($tag) use ($root) {
+                $node = $root->getElementsByTagName($tag)->item(0);
+                return $node ? trim($node->nodeValue) : '';
+            };
+            $uidBody = $this->normalize13($get('uid')) ?: null;
+            $aidBody = preg_replace('/\D/', '', $get('SessionID')) ?: null;
+    
+            if (!$uid && $uidBody) $uid = $uidBody;
+            if (!$aid && $aidBody) $aid = $aidBody;
+        }
+    
+        return [$uid, $aid];
+    }
+
+    /**
+     * Extract fields from the LoginIndust.asp XML for redirectToRegisterSnapshot().
+     * Returns: ['uid','bid','jt','progid','tax_number','iCustomer']
+     * Tolerant of tag-name variants and empty/missing XML.
+     */
+    private function parseIIndustryXml(?\DOMElement $root)
+    {
+        $out = array(
+            'uid'        => null,
+            'bid'        => null,
+            'jt'         => null,
+            'progid'     => null,
+            'tax_number' => null,
+            'iCustomer'  => null,
+        );
+        if (!$root instanceof \DOMElement) {
+            return $out;
+        }
+
+        // small getter with variants
+        $getFirst = function(\DOMElement $parent, array $names) {
+            foreach ($names as $n) {
+                $nodes = $parent->getElementsByTagName($n);
+                if ($nodes && $nodes->length) {
+                    $v = trim($nodes->item(0)->nodeValue);
+                    if ($v !== '') return $v;
+                }
+            }
+            return '';
+        };
+
+        // uid (Thai PID), bid (business id), jt (juristic type), program/progid
+        #$uid  = $getFirst($root, array('uid','UID','pid','PID'));
+        #$bid  = $getFirst($root, array('bid','BID','BusinessID','business_id'));
+        #$jt   = $getFirst($root, array('jt','JT','juristic_type','JuristicType'));
+        #$prog = $getFirst($root, array('progid','program_id','ProgramID','PROGID'));
+        // uid (Thai PID) from tag as before
+        $uid  = $getFirst($root, array('uid','UID','pid','PID'));
+
+        // prog/tax from tags as before
+        $prog = $getFirst($root, array('progid','program_id','ProgramID','PROGID'));
+        $tax  = $getFirst($root, array('tax_number','TaxNumber','TaxID','TAXID','contact_tax_id'));
+
+        // ---- jt/bid ONLY from <iOwner> JSON (no fallback) ----
+        $jt  = null;
+        $bid = null;
+
+        $owner = $root->getElementsByTagName('iOwner')->item(0);
+        if ($owner instanceof \DOMElement) {
+            $raw  = trim($owner->nodeValue ?? '');
+            $json = html_entity_decode($raw, ENT_QUOTES | ENT_XML1, 'UTF-8');
+
+            $obj = json_decode($json, true);
+            if (!is_array($obj) && strpos($json, '\\') !== false) {
+                $obj = json_decode(stripslashes($json), true);
+            }
+
+            if (is_array($obj)) {
+                // Choose the first JuristicList entry (your sample makes this the company)
+                $first = $obj['JuristicList'][0] ?? $obj;
+
+                $jtRaw  = $first['JuristicType'] ?? null;
+                $bidRaw = $first['JuristicID']   ?? null;
+
+                if ($jtRaw !== null)  $jt  = preg_replace('/\D+/', '', (string)$jtRaw) ?: null;
+                if ($bidRaw !== null) $bid = preg_replace('/\D+/', '', (string)$bidRaw) ?: null;
+            }
+        }
+
+        $tax  = $getFirst($root, array('tax_number','TaxNumber','TaxID','TAXID','contact_tax_id'));
+
+        // iCustomer block: try common containers; if complex, serialize child tags to assoc array
+        $iCustomer = null;
+        $custNode = null;
+        foreach (array('iCustomer','customer','Customer','ICustomer') as $cand) {
+            $nodes = $root->getElementsByTagName($cand);
+            if ($nodes && $nodes->length) { $custNode = $nodes->item(0); break; }
+        }
+        if ($custNode instanceof \DOMElement) {
+            if ($custNode->childNodes && $custNode->childNodes->length > 0) {
+                $arr = array();
+                foreach ($custNode->childNodes as $ch) {
+                    if ($ch instanceof \DOMElement) {
+                        $k = $ch->tagName;
+                        $v = trim($ch->nodeValue);
+                        if ($v !== '') $arr[$k] = $v;
+                    }
+                }
+                $iCustomer = $arr ?: trim($custNode->nodeValue);
+            } else {
+                $iCustomer = trim($custNode->nodeValue);
+            }
+        }
+
+        // normalize like your old code does
+        if ($uid !== '') $uid = $this->normalize13($uid) ?: null;
+        if ($bid !== '') $bid = preg_replace('/\D/', '', $bid) ?: null;
+        if ($jt  !== '') $jt  = preg_replace('/\D/', '', $jt)  ?: null;
+        if ($prog!== '') $prog= preg_replace('/\D/', '', $prog)?: null;
+        if ($tax !== '') $tax = preg_replace('/\D/', '', $tax) ?: null;
+
+        $out['uid']        = $uid ?: null;
+        $out['bid']        = $bid ?: null;
+        $out['jt']         = $jt  ?: null;
+        $out['progid']     = $prog?: null;
+        $out['tax_number'] = $tax ?: null;
+        $out['iCustomer']  = $iCustomer;
+
+        return $out;
+    }
+
+    /**
+     * เรียก upstream แบบมี fallback: Http → Guzzle → cURL
+     */
+    
+    private function fetchUpstream(Request $request, string $url): array
+    {
+        $base    = $this->tisiBaseByPath($request);
+        $referer = $this->buildTisiReferer($request, $base);
+
+        $headers = [
+            'User-Agent'      => 'Mozilla/5.0',
+            'Accept'          => 'text/xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language' => 'th,en-US;q=0.7,en;q=0.3',
+            'Origin'          => $base,
+            'Referer'         => $referer,
+            'Connection'      => 'close',
+        ];
+
+        
+        // (1) Laravel Http (ถ้ามี)
+        try {
+            if (class_exists(\Illuminate\Support\Facades\Http::class)) {
+                $resp = \Illuminate\Support\Facades\Http::withHeaders($headers)
+                    ->retry(2, 250)
+                    ->timeout(12)
+                    ->get($url);
+
+                return [
+                    'status' => $resp->status(),
+                    'ok'     => $resp->successful(),
+                    'ctype'  => $resp->header('Content-Type'),
+                    'body'   => (string) $resp->body(),
+                ];
+            }
+        } catch (\Throwable $e) {
+            Log::warning('[iindustry] Http facade fetch fail: '.$e->getMessage());
+        }
+
+        // (2) Guzzle (ส่วนใหญ่มีใน Laravel อยู่แล้ว)
+        try {
+            if (class_exists(\GuzzleHttp\Client::class)) {
+                $client = new \GuzzleHttp\Client([
+                    'headers'     => $headers,
+                    'http_errors' => false,
+                    'timeout'     => 12,
+                    'verify'      => true,
+                ]);
+                $resp = $client->get($url);
+                return [
+                    'status' => $resp->getStatusCode(),
+                    'ok'     => ($resp->getStatusCode() >= 200 && $resp->getStatusCode() < 300),
+                    'ctype'  => $resp->getHeaderLine('Content-Type'),
+                    'body'   => (string) $resp->getBody(),
+                ];
+            }
+        } catch (\Throwable $e) {
+            Log::warning('[iindustry] Guzzle fetch fail: '.$e->getMessage());
+        }
+
+        // (3) cURL ติดดิน
+        try {
+            $ch = curl_init($url);
+            $h  = [];
+            foreach ($headers as $k => $v) { $h[] = $k.': '.$v; }
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT        => 12,
+                CURLOPT_HTTPHEADER     => $h,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_MAXREDIRS      => 3,
+            ]);
+            $body   = curl_exec($ch);
+            $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $ctype  = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+            if ($body === false) {
+                Log::warning('[iindustry] cURL error: '.curl_error($ch));
+            }
+            curl_close($ch);
+            return [
+                'status' => $status ?: 0,
+                'ok'     => ($status >= 200 && $status < 300),
+                'ctype'  => $ctype ?: null,
+                'body'   => (string) $body,
+            ];
+        } catch (\Throwable $e) {
+            Log::error('[iindustry] cURL fetch fail: '.$e->getMessage());
+        }
+
+        return ['status' => 0, 'ok' => false, 'ctype' => null, 'body' => ''];
+    }
+
+    /*
+    private function isNonProdHost(\Illuminate\Http\Request $request): bool
+    {
+        // Respect proxy headers first (many front-ends set these on prod)
+        $xfh  = $request->headers->get('X-Forwarded-Host');
+        $host = strtolower($xfh ?: $request->getHost());  // e.g., dev.tisi.go.th, uat.tisi.go.th, www.tisi.go.th
+    
+        // Treat dev/uat/test subdomains as non-prod. Tight match: subdomain at the start only.
+        return (bool) preg_match('/^(dev|uat|test)\./', $host);
+    }
+    
+    private function tisiBaseByPath(Request $request): string
+    {
+        // Prefer proxy header if you’re behind a LB/WAF; fall back to PHP's host.
+        $host = strtolower($request->headers->get('X-Forwarded-Host') ?: $request->getHost());
+    
+        // Treat dev/uat/test subdomains as non-prod (strict: must be at the start).
+        $isNonProd = (bool) preg_match('/^(dev|uat|test)\./', $host);
+    
+        if ($isNonProd) {
+            return 'https://www4.tisi.go.th';   // UAT/Dev
+        }
+    
+        // Legacy prefix fallback stays (for old links hitting /moiapitest/... directly)
+        $prefix = strtolower(explode('/', trim($request->path(), '/'))[0] ?? '');
+        if ($prefix === 'moiapitest') {
+            return 'https://www4.tisi.go.th';
+        }
+    
+        // Default to PROD
+        return 'https://www3.tisi.go.th';
+    }
+    */
+
+    private function buildTisiReferer(Request $request, string $base): string
+    {
+        $prefix = strtolower(explode('/', trim($request->path(), '/'))[0] ?? '');
+        $path2  = ($prefix === 'moiapitest') ? '/moiapitest/ind_chk.asp?prog=3' : '/moiapi/ind_chk.asp?prog=3';
+        return $base.$path2;
+    }
+
+    /*
+    private function buildTisiLoginUrl(Request $request, string $uid, string $aid): string
+    {
+        $url = strtolower($request->fullUrl());
+    
+        // Check if current request URL belongs to dev/UAT environment
+        if (str_contains($url, 'dev')) {
+            $base = 'https://www4.tisi.go.th/moiapitest/LoginIndust.asp';
+        } else {
+            $base = 'https://www3.tisi.go.th/moiapi/LoginIndust.asp';
+        }
+    
+        $finalUrl = $base . '?uid=' . urlencode($uid) . '&aid=' . urlencode($aid);
+        Log::info('Redirecting to: ' . $finalUrl);
+    
+        return $finalUrl;
+    }
+
+
+    private function buildTisiLoginUrl(Request $request, string $uid, string $aid): string
+    {
+        $host = strtolower($request->headers->get('X-Forwarded-Host') ?: $request->getHost());
+        $isNonProd = (bool) preg_match('/^(dev|uat|test)\./', $host);
+    
+        $base = $isNonProd
+            ? 'https://www4.tisi.go.th/moiapitest/LoginIndust.asp'
+            : 'https://www3.tisi.go.th/moiapi/LoginIndust.asp';
+    
+        return $base.'?uid='.urlencode($uid).'&aid='.urlencode($aid);
+    }
+    */
+    
+/*
+private function redirectToRegisterSnapshot($uid, $bid, $jt, $progid)
+{
+    $token = $this->randomToken();
+
+    // ---- build & sanitize payload (UTF-8 safe) ----
+    $payload = [
+        'source'     => 'i-industry',
+        'jt'         => (string) $jt,
+        'uid'        => $uid !== null ? (string) $uid : null,
+        'bid'        => $bid !== null ? (string) $bid : null,
+        'progid'     => $progid !== null ? (string) $progid : null,
+    ];
+
+    $sanitize = function ($v) use (&$sanitize) {
+        if ($v === null || is_bool($v) || is_int($v) || is_float($v)) return $v;
+        if (is_string($v)) {
+            return mb_check_encoding($v, 'UTF-8') ? $v : mb_convert_encoding($v, 'UTF-8', 'auto');
+        }
+        if (is_array($v)) {
+            foreach ($v as $k => $vv) $v[$k] = $sanitize($vv);
+            return $v;
+        }
+        // objects/resources → stringify safely
+        return json_encode($v, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+    };
+    foreach ($payload as $k => $v) $payload[$k] = $sanitize($v);
+
+    // ---- write to SESSION (tokened key + stable "latest") ----
+    // (Colons in keys are fine, but keep the "latest" keys simple)
+    $session = session();
+    $session->put('prereg:' . $token, $payload);
+    $session->put('prereg_latest', $payload);
+    $session->put('prereg_token_latest', $token);
+    $session->save(); // force write before the 302
+
+    // ---- redirect RELATIVE to avoid host flips; also flash a plain key for the very next request ----
+    // ->with() uses Laravel flash session (still session-only) and guarantees availability on the next page load
+    $to = route('register.fill', ['token' => $token, 'source' => 'i-industry'], false);
+
+    return redirect()->to($to)
+        ->with('prereg', $payload)          // flash for immediate /register render
+        ->with('prereg_token', $token);     // optional: flash token too
+}
+*/
+
+
+private function redirectToRegisterSnapshot($uid, $bid, $jt, $appName)
+{
+    // ---- build & sanitize payload ----
+    $payload = [
+        'source'   => 'i-industry',
+        'jt'       => (string) $jt,
+        'uid'      => $uid !== null ? (string) $uid : null,
+        'bid'      => $bid !== null ? (string) $bid : null,
+        'app_name' => $appName !== null ? (string) $appName : null,
+    ];
+
+    $sanitize = function ($v) use (&$sanitize) {
+        if ($v === null || is_bool($v) || is_int($v) || is_float($v)) return $v;
+        if (is_string($v)) return mb_check_encoding($v, 'UTF-8') ? $v : mb_convert_encoding($v, 'UTF-8', 'auto');
+        if (is_array($v))  { foreach ($v as $k => $vv) $v[$k] = $sanitize($vv); return $v; }
+        return json_encode($v, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+    };
+    foreach ($payload as $k => $v) $payload[$k] = $sanitize($v);
+
+    // ---- write to SESSION only (no token in URL) ----
+    // 'reg_source' persists past the prereg pull in showFill() so register()
+    // can still verify server-side (not client-supplied) that this submission
+    // originated from the i-industry callback, not just the prefilled form data.
+    session()->put('prereg', $payload);
+    session()->put('reg_source', 'i-industry');
+    session()->put('reg_app_name', $payload['app_name']);
+    session()->save();
+
+    // ---- redirect (relative URL, no token) ----
+    $to = route('register.fill', ['source' => 'i-industry'], false);
+
+    return redirect()->to($to);
+}
+
+
+
+    // ===== helpers =====
+
+    /** keep-only-digits; require 13 (Thai ID); return '' if invalid */
+    private function normalize13($s)
+    {
+        $d = preg_replace('/\D/', '', (string)$s);
+        return strlen($d) === 13 ? $d : '';
+    }
+
+    private function randomToken()
+    {
+        try {
+            return bin2hex(random_bytes(16));
+        } catch (\Exception $e) {
+            return str_replace('.', '', uniqid('', true));
+        }
+    }
+}

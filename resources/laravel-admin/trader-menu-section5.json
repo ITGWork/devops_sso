@@ -1,0 +1,83 @@
+{
+    "menus": [{
+        "section": "Modules",
+        "_comment": "ระบบขึ้นทะเบียนตาม ม.5",
+        "icon": "mdi mdi-bookmark-plus",
+        "items": [            
+            {
+                "title": "section5_application_ins",
+                "display": "คำขอขึ้นทะเบียน ผู้ตรวจ และผู้ประเมิน",
+                "sub_menus":[
+                    {
+                        "title": "setion5-application-inspector",
+                        "display" : "ยื่นคำขอเป็นผู้ตรวจ/ผู้ประเมิน",
+                        "icon": "mdi mdi-human-handsup",
+                        "url": "\/request_section5\/application_inspectors"
+                    }
+                ]
+            },
+            {
+                "title": "section5_application_ibcb",
+                "display": "คำขอขึ้นทะเบียน IB/CB",
+                "sub_menus":[
+                    {
+                        "title": "setion5-application-ibcb",
+                        "display" : "ยื่นคำขอเป็นหน่วยตรวจสอบ (IB)",
+                        "icon": "mdi mdi-human-handsup",
+                        "url": "\/request-section-5\/application-ibcb"
+                    }
+                ]
+            },
+            {
+                "title": "section5_application_lab",
+                "display": "คำขอขึ้นทะเบียน LAB",
+                "sub_menus":[
+                    {
+                        "title": "setion5-application-lab",
+                        "display" : "ยื่นคำขอเป็นผู้ตรวจสอบ (LAB)",
+                        "icon": "mdi mdi-human-handsup",
+                        "url": "\/request-section-5\/application-lab"
+                    }
+                ]
+            },
+            {
+                "title": "factory-inspection",
+                "display": "รับคำขอตรวจโรงงาน",
+                "icon": "mdi mdi-factory",
+                "sub_menus": [
+                    {
+                        "title": "factory-inspection-elicense",
+                        "display": "รับคำขอตรวจโรงงาน E-license",
+                        "icon": "mdi mdi-factory",
+                        "url": "section5\/factory-inspection?type=elicense"
+                    },
+                    {
+                        "title": "factory-inspection-esurveillance",
+                        "display": "รับคำขอตรวจโรงงาน E-surveillance",
+                        "icon": "mdi mdi-factory",
+                        "url": "section5\/factory-inspection?type=esurveillance"
+                    }
+                ]
+            },
+            {
+                "title": "product-testing",
+                "display": "ติดตามคำขอทดสอบผลิตภัณฑ์",
+                "icon": "mdi mdi-test-tube",
+                "sub_menus": [
+                    {
+                        "title": "product-testing-elicense",
+                        "display": "คำขอทดสอบผลิตภัณฑ์ E-license",
+                        "icon": "mdi mdi-test-tube",
+                        "url": "section5\/product-testing?type=elicense"
+                    },
+                    {
+                        "title": "product-testing-esurveillance",
+                        "display": "คำขอทดสอบผลิตภัณฑ์ E-surveillance",
+                        "icon": "mdi mdi-test-tube",
+                        "url": "section5\/product-testing-surveillance"
+                    }
+                ]
+            }
+        ]
+    }]
+}

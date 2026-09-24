@@ -1,0 +1,29 @@
+{
+    "menus": [
+        {
+            "section": "รับคำขอตรวจโรงงาน",
+            "_comment": "ระบบรับคำขอตรวจโรงงาน IB/CB (Full Functionality)",
+            "items": [
+                {
+                    "title": "factory-inspection",
+                    "display": "รับคำขอตรวจโรงงาน",
+                    "icon": "mdi mdi-factory",
+                    "sub_menus": [
+                        {
+                            "title": "factory-inspection-elicense",
+                            "display": "รับคำขอตรวจโรงงาน E-license",
+                            "icon": "mdi mdi-factory",
+                            "url": "section5\/factory-inspection?type=elicense"
+                        },
+                        {
+                            "title": "factory-inspection-esurveillance",
+                            "display": "รับคำขอตรวจโรงงาน E-surveillance",
+                            "icon": "mdi mdi-factory",
+                            "url": "section5\/factory-inspection?type=esurveillance"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

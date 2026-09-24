@@ -1,0 +1,12 @@
+﻿<i-industry>
+  <SessionID>13367</SessionID>
+  <Return>True</Return>
+  <uid>3910100376858</uid>
+  <bid>0915564000546</bid>
+  <st>2025-09-01 06:22:00</st>
+  <entry>2025-09-01 06:23:00</entry>
+  <ipAddr>127.0.0.1</ipAddr>
+  <iCustomer>{"UserCode":"295961","UserName":"3910100376858","UserFirstName":"อณชล","UserLastName":"รอดปอง","UserPhone":"0973541642","UserEmail":"navakiriresort@gmail.com","UserRegisDate":"20/08/2025 11:06:06","UserRoleCode":"","UserRoleName":"Committee","UserGovernmentCode":"","UserGovernmentName":"","UserGovernmentType":"","Status":"true"}</iCustomer>
+  <iOwner>{"CitizenID":"3910100376858","Title":"","Name":"อณชล","Surname":"รอดปอง","FactoryList":[],"JuristicList":[{"JuristicID":"0915564000546","JuristicNameTh":"นาวาคร รสอรท จำกด","JuristicNameEn":"NAVAKIRI RESORT CO., LTD.","JuristicType":"2","FactoryList":[]}]} </iOwner>
+  <progid>1</progid>
+</i-industry>

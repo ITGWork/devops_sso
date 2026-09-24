@@ -1,0 +1,2100 @@
+<?php
+
+use Illuminate\Support\Facades\DB;
+use App\Models\Setting\SettingUrl;
+use App\Models\Setting\SettingSystem;
+use App\Models\Basic\Config;
+use App\Models\Basic\Province;
+use App\Models\Basic\District;
+use App\Models\Basic\Subdistrict;
+use App\Models\Basic\Zipcode;
+use App\Models\Agents\Agent;
+use App\Models\Agents\AgentSystem;
+use App\User;
+use App\AttachFile;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Cookie;
+use App\Sessions;
+use App\Models\Config\ConfigsEvidence;
+use App\Models\Config\ConfigsFormatCode;
+use App\Models\Config\ConfigsFormatCodeSub;
+use App\Models\Config\ConfigsFormatCodeLog;
+use App\Models\Log\LogNotification;
+use App\Models\WS\MOILog;
+use App\Models\Elicense\RosUsers;
+use App\UserHistory;
+use Illuminate\Support\Facades\Log;
+
+class HP
+{
+    static function GenerateToken()
+    {
+        $tokens = array();
+        $tokens[] = bin2hex(random_bytes(4));
+        $tokens[] = bin2hex(random_bytes(2));
+        $tokens[] = bin2hex(random_bytes(2));
+        $tokens[] = bin2hex(random_bytes(2));
+        $tokens[] = bin2hex(random_bytes(6));
+        return implode('-', $tokens);
+    }
+
+    static function DateThai($strDate)
+    {
+        if (is_null($strDate)) {
+            return '';
+        }
+        $strYear = date("Y", strtotime($strDate))+543;
+        $strMonth= date("n", strtotime($strDate));
+        $strDay= date("j", strtotime($strDate));
+
+        $strMonthCut = array("","ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค.");
+        $strMonthThai=$strMonthCut[$strMonth];
+
+        return "$strDay $strMonthThai $strYear";
+    }
+
+    static function DateTimeThai($strDate)
+    {
+        $strYear = date("Y", strtotime($strDate))+543;
+        $strMonth= date("n", strtotime($strDate));
+        $strDay= date("j", strtotime($strDate));
+        $strHour= date("H", strtotime($strDate));
+        $strMinute= date("i", strtotime($strDate));
+        $strSeconds= date("s", strtotime($strDate));
+        $strMonthCut = array("","ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค.");
+        $strMonthThai=$strMonthCut[$strMonth];
+        return "$strDay $strMonthThai $strYear, $strHour:$strMinute น.";
+    }
+
+    static function DateTimeThaiTormat_1($strDate)
+    {
+        $strYear = date("Y", strtotime($strDate))+543;
+        $strMonth= date("n", strtotime($strDate));
+        $strDay= date("j", strtotime($strDate));
+        $strHour= date("H", strtotime($strDate));
+        $strMinute= date("i", strtotime($strDate));
+        $strSeconds= date("s", strtotime($strDate));
+        $strMonthCut = array("","ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค.");
+        $strMonthThai=$strMonthCut[$strMonth];
+        return "$strDay $strMonthThai $strYear เวลา $strHour:$strMinute:$strSeconds";
+    }
+
+    static function DateThaiFull($strDate)
+    {
+        if ($strDate != '') {
+
+            $strYear = date("Y", strtotime($strDate)) + 543;
+            $strMonth = date("m", strtotime($strDate));
+            $strDay = date("j", strtotime($strDate));
+
+            $strMonthCut = self::MonthList();
+            $strMonthThai = $strMonthCut[$strMonth];
+            return "$strDay $strMonthThai $strYear";
+        } else {
+            return "";
+        }
+    }
+
+    static function MonthList()
+    {
+        $month = ['01' => 'มกราคม', '02' => 'กุมภาพันธ์', '03' => 'มีนาคม', '04' => 'เมษายน', '05' => 'พฤษภาคม', '06' => 'มิถุนายน', '07' => 'กรกฎาคม', '08' => 'สิงหาคม', '09' => 'กันยายน', '10' => 'ตุลาคม', '11' => 'พฤศจิกายน', '12' => 'ธันวาคม'];
+        return $month;
+    }
+
+    //แปลงวันที่รูปแบบ 31/01/2018 เป็น 2018-01-31
+    // static function convertDate($date, $minus=true)
+    // {
+    //     $negative = $minus===true?543:0;
+    //     $dates = explode('/', $date);
+    //     return ($dates['2']-$negative).'-'.$dates[1].'-'.$dates[0];
+    // }
+    static function convertDate($date)
+{
+    $dates = explode('/', $date);
+    if (count($dates) !== 3) return null;
+
+    $year = (int)$dates[2];
+    
+    // ตรวจสอบอัตโนมัติ: ถ้าปี > 2400 ให้ลบ 543 (ถือว่าเป็น พ.ศ.)
+    // ถ้าปีน้อยกว่านั้น ให้ถือว่าเป็น ค.ศ. ไม่ต้องลบ
+    if ($year > 2400) {
+        $year = $year - 543;
+    }
+
+    return $year . '-' . $dates[1] . '-' . $dates[0];
+}
+
+    //แปลงวันที่รูปแบบ 2018-01-31 เป็น 31/01/2018
+    static function revertDate($date, $plus=true)
+    {
+        $date = \Carbon\Carbon::parse($date)->format('Y-m-d');
+        $positive = $plus===true?543:0;
+        $dates = explode('-', $date);
+        return (count($dates)=='3')?$dates['2'].'/'.$dates[1].'/'.($dates[0]+$positive):'';
+    }
+
+
+    static function formatDateThai($strDate) {
+
+        if(is_null($strDate) || $strDate == '' || $strDate == '-' ){
+            return '-';
+        }
+        $strYear = date("Y", strtotime($strDate)) + 543;
+        $strMonth = date("m", strtotime($strDate));
+        $strDay = date("j", strtotime($strDate));
+        $month = ['01'=>'มกราคม', '02'=>'กุมภาพันธ์', '03'=>'มีนาคม', '04'=>'เมษายน', '05'=>'พฤษภาคม', '06'=>'มิถุนายน', '07'=>'กรกฎาคม', '08'=>'สิงหาคม', '09'=>'กันยายน', '10'=>'ตุลาคม', '11'=>'พฤศจิกายน', '12'=>'ธันวาคม'];
+        $strMonthThai = $month[$strMonth];
+        return "วันที่ $strDay เดือน $strMonthThai พ.ศ. $strYear";
+      }
+
+    static function ConvertCertifyFileName($name){
+        $name = str_replace('#', '', $name);
+        $name = str_replace('/', '', $name);
+        return $name;
+    }
+
+    static function getSettingUrl()
+    {
+        $datas = SettingUrl::get();
+        foreach ($datas as $item) {
+            $column_name = $item->column_name;
+            @$result->$column_name  = $item->data;
+        }
+        return $result;
+    }
+
+    static function getZipcode($sub = '',$dis = '',$pro = '')
+    {
+        $result = '';
+        $address_data  =  DB::table((new Subdistrict)->getTable().' AS sub') // อำเภอ
+                                    ->leftJoin((new District)->getTable().' AS dis', 'dis.AMPHUR_ID', '=', 'sub.AMPHUR_ID') // ตำบล
+                                    ->leftJoin((new Province)->getTable().' AS pro', 'pro.PROVINCE_ID', '=', 'sub.PROVINCE_ID')  // จังหวัด
+                                    ->leftJoin((new Zipcode)->getTable().' AS code', 'code.district_code', '=', 'sub.DISTRICT_CODE')  // รหัสไปรษณีย์
+                                    ->where(DB::raw("REPLACE(sub.DISTRICT_NAME,' ','')"),  '=',  str_replace(' ', '', $sub ))
+                                    ->where(DB::raw("REPLACE(dis.AMPHUR_NAME,' ','')"),  '=',   str_replace(' ', '', $dis ))
+                                    ->where(DB::raw("REPLACE(pro.PROVINCE_NAME,' ','')"),  '=',  str_replace(' ', '', $pro ))
+                                    ->selectRaw('code.zipcode AS zipcode')
+                                    ->first();
+
+        if(!is_null($address_data)){
+            $result =  $address_data->zipcode ?? null;
+        }
+
+        return $result;
+    }
+
+
+    static function AuthUserSSO($id = null)
+    {
+        if( is_null($id) ){
+            return Auth::user();
+        }else{
+            return User::where('id', $id )->first();
+        }
+    }
+
+     //Config ระบบ
+     static function getConfig()
+     {
+         $result = new stdClass();
+         $generalList = Config::get();
+         foreach ($generalList as $general) {
+             $variable = $general->variable;
+             $result->$variable = $general->data;
+         }
+         return $result;
+     }
+
+    /**
+     * เช็คว่า $user กรอกข้อมูลผู้ติดต่อที่จำเป็นครบไหม
+     * ใช้ร่วมกันระหว่าง LayoutMiddleware (เช็คทุก request ปกติ) และ
+     * loginAndRedirectByProgid() (เช็คตอน auto-login ข้าม middleware)
+     * ต้อง sync เงื่อนไขให้ตรงกันเป๊ะทั้งสองที่ ถ้าจะแก้ต้องแก้พร้อมกัน
+     */
+    static function hasRequiredContactInfo($user): bool
+    {
+        return !(
+            empty($user->contact_tax_id) ||
+            empty($user->contact_prefix_name) ||
+            empty($user->contact_first_name) ||
+            empty($user->contact_last_name) ||
+            empty($user->contact_phone_number) ||
+            empty($user->tel) ||
+            empty($user->zipcode) ||
+            empty($user->contact_address_no) ||
+            empty($user->contact_subdistrict) ||
+            empty($user->contact_district) ||
+            empty($user->contact_province) ||
+            empty($user->contact_zipcode)
+        );
+    }
+
+    /**
+     * sync ข้อมูลที่อยู่หลัก/ข้อมูลผู้ติดต่อ ไปยัง ros_users (tisi_db, ระบบ e-license)
+     * จับคู่ด้วย username (ตรงกับ devops_itisi/components/com_users/controllers/
+     * checklogin.php::get_sso_and_redirect() ที่ lookup ด้วย username เท่านั้น -
+     * เดิมจับคู่ด้วย tax_number ซึ่งเสี่ยงจับผิดแถวถ้ามีหลายสาขาใช้ tax_number เดียวกัน);
+     * ล้มเหลวได้โดยไม่กระทบการบันทึกโปรไฟล์หลักใน sso_users
+     * ย้ายมาจาก ProfileController::syncToRosUsers() (private เดิม) เพื่อให้เรียกใช้ร่วมกัน
+     * กับ checkAndSyncApiData() ได้ด้วย (single source of truth)
+     */
+    static function syncToRosUsers(User $user)
+    {
+        // ปิดการทำงานชั่วคราว: บาง server (เช่น sso1.tisi.go.th) ไม่มีไฟล์ model
+        // App\Models\Elicense\RosUsers ทำให้เกิด "Class ... RosUsers not found" ซึ่งเป็น
+        // \Error (PHP7, Class not found) ไม่ใช่ \Exception เลยไม่โดน catch ด้านล่างจับ
+        // ทำให้ทั้ง request (register/auto-login) ล่มไปด้วย ปิดไว้ก่อนจนกว่าจะแก้ที่ต้นตอ
+        return;
+
+        /*
+        if (empty($user->tax_number)) {
+            return;
+        }
+
+        // ros_users ใช้ convention คนละแบบกับ sso_users: 1=บุคคลธรรมดา, 2=อื่นๆ (นิติบุคคล/
+        // คณะบุคคล) - แปลตาม devops_itisi/checklogin.php::insert_user()/update_user()
+        // (sso_users: 1=นิติบุคคล, 2=บุคคลธรรมดา, 3=คณะบุคคล) ต้องแปลให้ตรงกันเสมอ ไม่งั้น
+        // ค่าจะสลับไปมาทุกครั้งที่ระบบ e-license เขียนทับกลับ (mod_checklogin ทำงานทุกหน้า)
+        $rosApplicantTypeId = ($user->applicanttype_id == 2) ? 1 : 2;
+
+        $mapped = [
+            'address_no'   => $user->address_no,
+            'building'     => $user->building,
+            'street'       => $user->street,
+            'moo'          => $user->moo,
+            'soi'          => $user->soi,
+            'subdistrict'  => $user->subdistrict,
+            'district'     => $user->district,
+            'province'     => $user->province,
+            'zipcode'      => $user->zipcode,
+            'tel'          => $user->tel,
+            'fax'          => $user->fax,
+
+            'contact_name'         => $user->contact_name,
+            'contact_tax_id'       => $user->contact_tax_id,
+            'contact_prefix_name'  => $user->contact_prefix_name,
+            'contact_prefix_text'  => $user->contact_prefix_text,
+            'contact_first_name'   => $user->contact_first_name,
+            'contact_last_name'    => $user->contact_last_name,
+            'contact_tel'          => $user->contact_tel,
+            'contact_fax'          => $user->contact_fax,
+            'contact_phone_number' => $user->contact_phone_number,
+
+            'applicanttype_id' => $rosApplicantTypeId,
+        ];
+
+        try {
+            $rosUser = RosUsers::on('mysql_elicense')->where('username', $user->username)->first();
+
+            if ($rosUser) {
+                $rosUser->update($mapped);
+            } else {
+                $newRosUser = RosUsers::on('mysql_elicense')->create(array_merge($mapped, [
+                    'name'          => $user->name,
+                    'username'      => $user->username,
+                    'email'         => $user->email,
+                    'password'      => $user->password,
+                    'tax_number'    => $user->tax_number,
+                    'department_id' => 0,
+                    // คอลัมน์ NOT NULL ไม่มี default ในตาราง ros_users (Joomla #__users)
+                    // ตาม pattern เดียวกับ checklogin.php::insert_user() ฝั่ง e-License
+                    'block'              => 0,
+                    'sendEmail'          => 0,
+                    'registerDate'       => date('Y-m-d H:i:s'),
+                    'activation'         => 1,
+                    'person_type'        => $user->person_type,
+                    'branch_type'        => $user->branch_type,
+                    'branch_code'        => $user->branch_code,
+                    'prefix_name'        => $user->prefix_name,
+                    'prefix_text'        => $user->prefix_text,
+                    'date_niti'          => $user->date_niti,
+                    'date_of_birth'      => $user->date_of_birth,
+                    'person_first_name'  => $user->person_first_name,
+                    'person_last_name'   => $user->person_last_name,
+                    'personfile'         => $user->personfile,
+                    'corporatefile'      => $user->corporatefile,
+                    'params'             => '',
+                    'agency_tel'         => '',
+                    'authorize_data'     => '',
+                ]));
+
+                // Joomla ผูกสิทธิ์เข้าใช้งานผ่าน ros_user_usergroup_map แยกต่างหากจาก ros_users
+                // ถ้าไม่ insert แถวนี้ ผู้ใช้ใหม่จะ login e-License ไม่ได้ (วน redirect ที่ checklogin.allowlogin)
+                // group_id = 2 คือ "ผู้ประกอบการ" (ยืนยันจาก ros_usergroups โดยผู้ดูแลระบบ)
+                if (!empty($newRosUser->id)) {
+                    DB::connection('mysql_elicense')->table('ros_user_usergroup_map')->insert([
+                        'user_id'  => $newRosUser->id,
+                        'group_id' => 2,
+                    ]);
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('sync profile to ros_users failed: ' . $e->getMessage(), ['tax_number' => $user->tax_number, 'trace' => $e->getTraceAsString()]);
+        }
+        */
+    }
+
+    /**
+     * เช็คข้อมูลผู้ใช้กับ API กลาง (DBD/DOPA/RD) แล้วอัปเดต sso_users + ros_users ถ้าไม่ตรง
+     * ใช้ตอน auto-login (i-industry/ThaiD) ให้พฤติกรรมตรงกับ manual login
+     * (LoginController::login()) ทุกประการ - บล็อกกรณีเลิกกิจการ/เสียชีวิต/ไม่พบข้อมูล เหมือนกัน
+     * เคารพ flag เปิด/ปิดจาก basic_configs (check_api_tisi_corporation/person/faculty)
+     * เหมือนที่ manual login เช็ค - ถ้าปิด ข้ามการเช็คไปเลย (ปฏิบัติเหมือน "API เชื่อมต่อไม่ได้")
+     *
+     * ไม่ throw ออกไป - ถ้า API error/timeout จะ log แล้วปล่อยให้ login ผ่าน (ไม่บล็อก
+     * auto-login ด้วยปัญหา API ภายนอกที่ไม่คาดคิด ต่างจากกรณี block ที่ตั้งใจ)
+     *
+     * @return array{block: string|null, message: string|null} 'block' = ข้อความ error ถ้าต้อง
+     * block login (redirect กลับ /login), 'message' = ข้อความสรุปข้อมูลที่อัปเดต (HTML) ถ้ามีการ
+     * แก้ไข ให้ caller เอาไปแสดง popup ยืนยันก่อนไปปลายทาง ทั้งสอง key เป็น null พร้อมกันได้
+     * (ผ่านฉลุย ไม่มีอะไรต้องแจ้ง) แต่จะไม่มีทางไม่ null พร้อมกันทั้งคู่
+     */
+    static function checkAndSyncApiData($user)
+    {
+        $pass = ['block' => null, 'message' => null];
+
+        if (!in_array($user->applicanttype_id, [1, 2, 3])) {
+            return $pass;
+        }
+        if (!self::check_number_counter($user->tax_number, 13)) {
+            return $pass;
+        }
+
+        $config = self::getConfig();
+        $ip     = request()->ip();
+        $compare_msg = null;
+
+        try {
+            $login = new \App\Http\Controllers\Auth\LoginController();
+
+            if ($user->applicanttype_id == 1) { // นิติบุคคล - DBD
+                if (empty($config->check_api_tisi_corporation)) {
+                    return $pass;
+                }
+                $entity = $login->CheckLegalEntity($user->tax_number);
+                if ($entity['status'] === false) {
+                    return ['block' => 'ขออภัยเลขนิติบุคคล '.$user->tax_number.' ของคุณไม่พบการขึ้นทะเบียนกับกรมพัฒนาธุรกิจการค้า <br><br><a href="'.url('contact').'" target="_blank">กรุณาติดต่อเจ้าหน้าที่</a>', 'message' => null];
+                } elseif ($entity['status'] === true) { // เชื่อม api ไม่ได้ ให้ login ได้
+                    return $pass;
+                } elseif ($entity['status'] === 'other') {
+                    return ['block' => 'เกิดเหตุขัดข้องการเชื่อมโยงข้อมูลของระบบ <a href="'.url('contact').'" target="_blank">กรุณาติดต่อเจ้าหน้าที่</a>', 'message' => null];
+                } elseif (!in_array($entity['status'], [1, 2, 3])) { // ไม่ให้ Login
+                    if ($user->juristic_status != 4) {
+                        UserHistory::Add($user->id, 'juristic_status', $user->juristic_status, 4, null, 'system:sso');
+                    }
+                    if ($user->juristic_cause_quit != $entity['status']) {
+                        UserHistory::Add($user->id, 'juristic_cause_quit', $user->juristic_cause_quit, $entity['status'], null, 'system:sso');
+                    }
+                    $user->juristic_status     = 4;
+                    $user->juristic_cause_quit = $entity['status'];
+                    $user->save();
+                    return ['block' => 'เลขนิติบุคคล '.$user->tax_number.' ไม่สามารถ Login ได้ เนื่องจากมีสถานะกิจการเป็น:&nbsp;<u>'.$entity['status'].'</u>', 'message' => null];
+                } else { // Login ปกติ
+                    if ($user->juristic_status != $entity['status']) {
+                        UserHistory::Add($user->id, 'juristic_status', $user->juristic_status, $entity['status'], null, 'system:sso');
+                    }
+                    $user->juristic_status = $entity['status'];
+                    $user->save();
+                    $compare_msg = $login->compareCompanyAndUpdate($user, $entity['data']);
+                }
+            } elseif ($user->applicanttype_id == 2) { // บุคคลธรรมดา - DOPA
+                if (empty($config->check_api_tisi_person)) {
+                    return $pass;
+                }
+                $person = $login->getPerson($user->tax_number, $ip);
+                if (is_null($person)) {
+                    return ['block' => 'ขออภัยเลขประจำตัวประชาชน '.$user->tax_number.' ไม่พบในทะเบียนราษฎร์กรุณาติดต่อเจ้าหน้าที่', 'message' => null];
+                } elseif ($person === true) {
+                    return $pass;
+                } elseif ($person === false) {
+                    return ['block' => 'เกิดเหตุขัดข้องการเชื่อมโยงข้อมูลของระบบ <a href="'.url('contact').'" target="_blank">กรุณาติดต่อเจ้าหน้าที่</a>', 'message' => null];
+                } elseif ($person->statusOfPersonCode == '1') {
+                    return ['block' => 'เลขประจำตัวประชาชน '.$user->tax_number.' ไม่สามารถ Login ได้ เนื่องจากมีสถานะเป็น:&nbsp;<u>เสียชีวิต</u>', 'message' => null];
+                } else {
+                    $compare_msg = $login->comparePersonAndUpdate($user, $person);
+                }
+            } elseif ($user->applicanttype_id == 3) { // คณะบุคคล - RD กรมสรรพากร
+                if (empty($config->check_api_tisi_faculty)) {
+                    return $pass;
+                }
+                $rd = self::getRdVat($user->tax_number, $ip);
+                if (!empty($rd->vMessageErr)) {
+                    return ['block' => 'ขออภัยเลขประจำตัวผู้เสียภาษี '.$user->tax_number.' ไม่พบในกรมสรรพากรกรุณาติดต่อเจ้าหน้าที่', 'message' => null];
+                } elseif ($rd->status === 'no-connect') {
+                    return $pass;
+                } elseif (!empty($rd->Message) && $rd->Message == 'Response Failed') {
+                    return ['block' => 'เกิดเหตุขัดข้องการเชื่อมโยงข้อมูลของระบบ <a href="'.url('contact').'" target="_blank">กรุณาติดต่อเจ้าหน้าที่</a>', 'message' => null];
+                } else {
+                    $compare_msg = $login->compareRdAndUpdate($user, $rd);
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::error('[checkAndSyncApiData] failed: '.$e->getMessage(), ['user_id' => $user->id, 'tax_number' => $user->tax_number, 'trace' => $e->getTraceAsString()]);
+            return $pass; // API error ไม่คาดคิด - ไม่ block login (เหมือนกรณี "เชื่อมต่อไม่ได้")
+        }
+
+        if (!empty($compare_msg)) {
+            self::syncToRosUsers($user->fresh());
+            return ['block' => null, 'message' => $compare_msg];
+        }
+
+        return $pass;
+    }
+
+    /**
+     * ล้าง session/cookie login ปัจจุบันทิ้ง (ถ้ามี) เหมือนกด logout เอง
+     * ใช้ร่วมกันระหว่าง IIndustryCallbackController/ThaiDCallbackController ตอน identity
+     * ใหม่ที่เพิ่งยืนยันตัวตนมาไม่ตรงกับ user ที่ login ค้างอยู่เดิม (auto-login คนละ
+     * progid/บัญชีไปแล้วก่อนหน้า) กันไม่ให้ auto-login รอบใหม่ไปปนกับ session ของคนละคน
+     * ย้ายมาจาก IIndustryCallbackController::clearStaleAuthSession() (private เดิม)
+     * เพื่อให้ ThaiDCallbackController เรียกใช้ร่วมกันได้ ไม่ต้อง copy โค้ดซ้ำ
+     */
+    static function clearStaleAuthSession(\Illuminate\Http\Request $request): void
+    {
+        if (!Auth::check()) {
+            return;
+        }
+        Sessions::Remove(session()->getId());
+        Auth::logout();
+        $request->session()->invalidate();
+        $config = self::getConfig();
+        Cookie::queue(Cookie::forget($config->sso_name_cookie_login, null, $config->sso_domain_cookie_login));
+    }
+
+    /**
+     * ล็อกอิน $user เข้าระบบ แล้ว redirect ไปยังปลายทางตาม progid (ตาราง moi_prog)
+     * ใช้ร่วมกันระหว่าง RegisterController (หลังสมัครจาก i-industry/ThaiD) และ
+     * ตัว callback controller ต่างๆ (กรณีตรวจพบว่ามีบัญชีอยู่แล้ว ไม่ต้องสมัครใหม่)
+     *
+     * ถ้าข้อมูลผู้ติดต่อยังไม่ครบ (ตาม hasRequiredContactInfo) จะ redirect ไป
+     * /profile/show ให้กรอกก่อน (เหมือน LayoutMiddleware) โดยเก็บปลายทางเดิมไว้ใน
+     * session key "intended_after_profile" ให้ ProfileController::update() พาไปต่อ
+     * ให้เองหลังบันทึกสำเร็จ - ไม่งั้น response นี้จะ return ตรงจาก request เดียวกับ
+     * Auth::login() เลย ไม่มีทางผ่าน LayoutMiddleware ให้เช็คซ้ำได้
+     *
+     * คืนค่า null ถ้าไม่มีปลายทางที่ใช้งานได้ (progid ไม่มีในตาราง / status ไม่ใช่ 'Y' /
+     * prog_url ว่าง) ให้ caller จัดการ fallback เอง (เช่น flash message + แสดงหน้าเดิม)
+     *
+     * $forceProfileCheck = true: บังคับพาไป /profile/show เสมอไม่ว่าข้อมูลจะครบหรือไม่
+     * (ใช้ตอนสมัครสมาชิกครั้งแรกเท่านั้น) เพื่อให้ผู้ใช้กด "บันทึก" อย่างน้อยครั้งเดียว
+     * ซึ่งจะ trigger ProfileController::update() -> syncToRosUsers() ให้ข้อมูลไปที่
+     * ros_users (e-license) แน่นอน ไม่งั้นถ้าข้อมูลครบตั้งแต่ตอนกรอกฟอร์ม register
+     * ป็อปอัพจะไม่มีวันโผล่ และ syncToRosUsers() จะไม่เคยถูกเรียกเลย
+     * ตอน login ปกติ (มีบัญชีอยู่แล้ว) ให้เว้นค่านี้ไว้ (false) ไม่ต้องบังคับทุกครั้ง
+     *
+     * "session_id" โดเมน .tisi.go.th + แถวใน Sessions ต้องถูกสร้างเสมอไม่ว่าจะหา
+     * ปลายทางใน moi_prog เจอหรือไม่ก็ตาม เพราะ cookie นี้คือกลไกที่ระบบอื่นๆ ใช้
+     * auto-login ผ่าน https://sso.tisi.go.th/api/v1/auth โดยไม่ต้อง login ซ้ำ -
+     * ฟังก์ชันนี้จึง login เสมอ ไม่คืนค่า null อีกต่อไป (เดิม return null ตั้งแต่ก่อน
+     * Auth::login() ถ้าหา progid ไม่เจอ ทำให้ user ที่ยืนยันตัวตนสำเร็จแล้วไม่ได้ login
+     * เลยถ้า moi_prog ไม่มีปลายทางให้ไป)
+     *
+     * $checkApiData = true: เช็คข้อมูลกับ API กลาง (DBD/DOPA/RD) ก่อน login เหมือน manual
+     * login ทุกประการ (checkAndSyncApiData()) - ถ้าเจอเงื่อนไข block (เลิกกิจการ/เสียชีวิต/
+     * ไม่พบข้อมูล) จะไม่ login เลย (เหมือน manual login ที่ return back() ก่อนถึง
+     * set_login_session() เสมอ) redirect กลับ /login พร้อม flash message แทน
+     * ใช้เฉพาะ auto-login ที่พบบัญชีเดิมอยู่แล้ว (i-industry/ThaiD) ไม่ใช้กับ flow
+     * สมัครสมาชิกใหม่ (ข้อมูลเพิ่งถูกดึงจาก API สดๆ ตอนกรอกฟอร์มอยู่แล้ว)
+     *
+     * @return \Illuminate\Http\Response
+     */
+    static function loginAndRedirectByProgid($user, $progid, bool $forceProfileCheck = false, bool $checkApiData = false)
+    {
+        $apiUpdateMessage = null;
+        if ($checkApiData) {
+            $apiResult = self::checkAndSyncApiData($user);
+            if (!empty($apiResult['block'])) {
+                return redirect('/login')->with('flash_message', $apiResult['block']);
+            }
+            $apiUpdateMessage = $apiResult['message'];
+        }
+
+        // เหมือน LoginController::set_login_session() - ต้องสร้างแถวใน Sessions เอง
+        // เพราะ LayoutMiddleware ที่ทำหน้าที่นี้ตามปกติรันก่อน Auth::login() ของ
+        // request นี้ไปแล้ว จะไม่ทันสร้างให้
+        Auth::login($user);
+        $user->lastvisitDate = date('Y-m-d H:i:s');
+        $user->save();
+
+        $request    = request();
+        $session_id = session()->getId();
+        Sessions::Add($session_id, $user->getKey(), $request->ip(), $request->userAgent(), 'web');
+
+        $ssoConfig = self::getConfig();
+        $minutes   = config('session.lifetime');
+        Cookie::queue($ssoConfig->sso_name_cookie_login,
+                      $session_id,
+                      $minutes,
+                      null,
+                      $ssoConfig->sso_domain_cookie_login,
+                      null,
+                      false
+                  );
+
+        $prog = \App\Models\Basic\MoiProg::where('progid', $progid)
+                    ->where('status', 'Y')
+                    ->first();
+        $destinationUrl = (!empty($prog) && !empty($prog->prog_url)) ? $prog->prog_url : '/';
+
+        if ($forceProfileCheck || !self::hasRequiredContactInfo($user)) {
+            session()->put('intended_after_profile', $destinationUrl);
+            return redirect('/profile/show')->with('required_contact', '1');
+        }
+
+        if (!empty($apiUpdateMessage)) {
+            // ปลายทางมักเป็นระบบภายนอก (e-License ฯลฯ) ถ้า redirect ตรงไปเลยผู้ใช้จะไม่มีทาง
+            // เห็นข้อความนี้ - พาไปหน้ายืนยันในระบบเราก่อน กดยืนยันแล้วค่อยไปปลายทางจริง
+            session()->put('api_update_confirm_message', $apiUpdateMessage);
+            session()->put('api_update_confirm_destination', $destinationUrl);
+            return redirect('/api-data-confirm');
+        }
+
+        return redirect($destinationUrl);
+    }
+
+    /**
+     * สร้าง response สำหรับส่งผู้ใช้ไปปลายทางที่ผูกกับ $setting (แถวจาก setting_systems)
+     * ตาม transfer_method - pattern เดียวกับ SSO\RedirectController::index() ที่ปุ่ม
+     * dashboard ปกติใช้อยู่แล้ว: 'redirect' = redirect() เปล่าๆ (ปลายทางอ่าน session_id
+     * จาก cookie เอง), 'form_post' = แสดงฟอร์ม auto-submit POST 'session_id' ไปให้
+     * (ดู resources/views/sso/redirect.blade.php)
+     *
+     * คืนค่า redirect('/') ถ้า $setting เป็น null (หา app_name ไม่เจอ/state ไม่ใช่ 1)
+     */
+    static function buildSystemRedirect($setting)
+    {
+        if (empty($setting) || empty($setting->urls)) {
+            return redirect('/');
+        }
+
+        if ($setting->transfer_method === 'form_post') {
+            return response()->view('sso/redirect', ['setting' => $setting]);
+        }
+
+        return redirect($setting->urls);
+    }
+
+    /**
+     * ล็อกอิน $user เข้าระบบ แล้ว redirect ไปยังปลายทางตาม app_name (ตาราง setting_systems)
+     * แทนที่ loginAndRedirectByProgid()/moi_prog เดิม - ใช้ตาราง setting_systems ตัวเดียวกับ
+     * ที่ปุ่ม dashboard ปกติใช้ (SSO\RedirectController) เพื่อให้ ThaiD/i-industry auto-login
+     * พาไปปลายทางที่ใช้โปรโตคอลมาตรฐาน (session_id cookie + /api/v1/auth) แทนไฟล์เฉพาะกิจ
+     * แบบเดิม (ดู docs/bugsso.md ข้อ 17 สำหรับ root cause/บริบทเต็ม)
+     *
+     * $appName มาจากคุกกี้ "appname" (Domain=.tisi.go.th) ที่ทีม ASP ส่งมาโดยตรง - ไม่ใช้
+     * progid/moi_prog อีกต่อไป
+     *
+     * logic ที่เหลือ (checkApiData, hasRequiredContactInfo/บังคับกรอกโปรไฟล์,
+     * api_update_confirm) เหมือนกับ loginAndRedirectByProgid() ทุกประการ - เก็บ setting id
+     * ไว้ในปลายทางที่เบี่ยงไปก่อน (profile/api-confirm) ด้วย เพื่อให้ ProfileController /
+     * LoginController::proceedApiDataConfirm() เรียก buildSystemRedirect() ต่อได้ถูกต้อง
+     * แม้ปลายทางเป็น form_post
+     *
+     * @return \Illuminate\Http\Response
+     */
+    static function loginAndRedirectByAppName($user, $appName, bool $forceProfileCheck = false, bool $checkApiData = false)
+    {
+        $apiUpdateMessage = null;
+        if ($checkApiData) {
+            $apiResult = self::checkAndSyncApiData($user);
+            if (!empty($apiResult['block'])) {
+                return redirect('/login')->with('flash_message', $apiResult['block']);
+            }
+            $apiUpdateMessage = $apiResult['message'];
+        }
+
+        Auth::login($user);
+        $user->lastvisitDate = date('Y-m-d H:i:s');
+        $user->save();
+
+        $request    = request();
+        $session_id = session()->getId();
+        Sessions::Add($session_id, $user->getKey(), $request->ip(), $request->userAgent(), 'web');
+
+        $ssoConfig = self::getConfig();
+        $minutes   = config('session.lifetime');
+        Cookie::queue($ssoConfig->sso_name_cookie_login,
+                      $session_id,
+                      $minutes,
+                      null,
+                      $ssoConfig->sso_domain_cookie_login,
+                      null,
+                      false
+                  );
+
+        $setting = !empty($appName)
+            ? SettingSystem::where('app_name', $appName)->where('state', 1)->first()
+            : null;
+
+        if ($forceProfileCheck || !self::hasRequiredContactInfo($user)) {
+            session()->put('intended_after_profile_setting_id', $setting->id ?? null);
+            session()->put('intended_after_profile', $setting->urls ?? '/');
+            return redirect('/profile/show')->with('required_contact', '1');
+        }
+
+        if (!empty($apiUpdateMessage)) {
+            session()->put('api_update_confirm_message', $apiUpdateMessage);
+            session()->put('api_update_confirm_setting_id', $setting->id ?? null);
+            session()->put('api_update_confirm_destination', $setting->urls ?? '/');
+            return redirect('/api-data-confirm');
+        }
+
+        return self::buildSystemRedirect($setting);
+    }
+
+    static function checkFileStorage($file_path)
+    {//get file from storage
+
+        $result = false;
+        $public = Storage::disk('uploads')->getDriver()->getAdapter()->getPathPrefix();
+
+        if (is_file($public . $file_path)) {//ถ้ามีไฟล์ที่พร้อมแสดงอยู่แล้ว
+            $result = true;
+        } else {
+
+            $exists = Storage::exists($file_path);
+            if ($exists) {//ถ้ามีไฟล์ใน storage
+                $result = true;
+            }
+        }
+
+        return $result;
+
+    }
+
+
+    static function getFileStorage($file_path)
+    {//get file from storage
+
+        $result = '';
+        $public = Storage::disk('uploads')->getDriver()->getAdapter()->getPathPrefix();
+
+        if (is_file($public.$file_path)) {//ถ้ามีไฟล์ที่พร้อมแสดงอยู่แล้ว
+            $result = Storage::disk('uploads')->url($file_path);
+        } else {
+
+            try {
+                $exists = Storage::exists($file_path);
+                if ($exists) {//ถ้ามีไฟล์ใน storage
+
+                    $stream = Storage::getDriver()->readStream($file_path);
+
+                    $attach =  str_replace(basename($file_path),"",$file_path);
+
+                    if(!Storage::disk('uploads')->has($attach)){
+                        Storage::disk('uploads')->makeDirectory($attach) ;
+                    }
+                    $byte_put = file_put_contents($public.$file_path, stream_get_contents($stream), FILE_APPEND);
+                    if ($byte_put !== false) {
+                        $result = Storage::disk('uploads')->url($file_path);
+                    }
+                }
+            } catch (\Throwable $e) {
+                //ไฟล์เก่าอยู่บน FTP disk เริ่มต้น (default) ซึ่งบางครั้ง server ปลายทางเชื่อมต่อไม่ได้
+                //ไม่ให้ error ของ storage ภายนอกทำให้ทั้งหน้าล่มไปด้วย แค่ไม่มีไฟล์ให้แสดงเท่านั้น
+                \Log::warning('HP::getFileStorage failed to fetch from default disk', [
+                    'file_path' => $file_path,
+                    'message' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return $result;
+
+    }
+
+    // icon สกุลไฟล์แนบต่างๆ
+    static function FileExtension($file) {
+        $result = '';
+        if(!is_null($file) && $file != ''){
+            $type = strrchr(basename($file),".");
+            if($type == '.pdf'    || $type ==  '.PDF'){
+                $result =  '<i class="fa fa-file-pdf-o" style="font-size:20px; color:red" aria-hidden="true"></i>';
+            }elseif($type == '.xlsx'){
+                $result =  '<i class="fa  fa-file-excel-o" style="font-size:20px; color:#00b300" aria-hidden="true"></i>';
+            }elseif($type == '.doc' || $type == '.docx'){
+                $result =  '<i  class="fa fa-file-word-o"  style="font-size:20px; color:#0000ff" aria-hidden="true"></i>';
+            }elseif($type == '.png' || $type == '.jpg'  || $type == '.jpeg'){
+                $result =  '<i class="fa  fa-file-photo-o" style="font-size:20px; color:#ff9900" aria-hidden="true"></i>';
+            }elseif($type == '.zip' || $type == '.7z' ){
+                $result =  '<i class="fa fa-file-zip-o" style="font-size:20px; color:#ff0000" aria-hidden="true"></i>';
+            }else{
+                $result =  '<i class="fa  fa-file-text" style="font-size:20px; color:#92b9b9" aria-hidden="true"></i>';
+            }
+        }else{
+            $result =  '<i class="fa  fa-file-text" style="font-size:20px; color:#92b9b9" aria-hidden="true"></i>';
+        }
+        return $result;
+    }
+
+
+    static function singleFileUpload($request_file, $attach_path = '', $tax_number='0000000000000', $username='0000000000000', $systems = "SSO", $table_name = null , $ref_id = null, $section = null, $attach_text = null, $setting_file_id = null){
+
+        $attach             = $request_file;
+        $file_size          = (method_exists($attach, 'getSize')) ? $attach->getSize() : 0;
+        $file_extension     = $attach->getClientOriginalExtension();
+        $fullFileName       = str_random(10).'-date_time'.date('Ymd_hms') . '.' .$file_extension ;
+
+        $path               = Storage::putFileAs($attach_path.'/'.$tax_number, $attach,  str_replace(" ","",$fullFileName) );
+        $file_name          = self::ConvertCertifyFileName($attach->getClientOriginalName());
+
+        AttachFile::create([
+                            'tax_number'        => $tax_number,
+                            'username'          => $username,
+                            'systems'           => $systems,
+                            'ref_table'         => $table_name,
+                            'ref_id'            => $ref_id,
+                            'url'               => $path,
+                            'filename'          => $file_name,
+                            'new_filename'      => $fullFileName,
+                            'caption'           => $attach_text,
+                            'size'              => $file_size,
+                            'file_properties'   => $file_extension,
+                            'section'           => $section,
+                            'setting_file_id'   => $setting_file_id,
+                            'created_by'        => auth()->user()->getKey(),
+                            'created_at'        => date('Y-m-d H:i:s')
+                          ]);
+
+    }
+
+    static function ConfigEvidence($evidence_group_id){
+        $configs_evidences = ConfigsEvidence::where('evidence_group_id', $evidence_group_id)->where('state', 1)->orderBy('ordering')->get();
+        return $configs_evidences;
+    }
+
+    //ดึงรายชื่อผู้ที่มอบอำนาจให้ user นี้ทั้งหมด
+    /*
+        $agent_id = sso_users.id
+        return Collection ([user.id => [user data]])
+    */
+    static function getAuthoritys($agent_id, $state=2){ //$state=2 สถานะดำเนินการตามรับมอบ
+        $table_user = (new User)->getTable();
+        $table_agent = (new Agent)->getTable();
+        $agents =  Agent::where($table_agent.'.agent_id', $agent_id)
+                        ->where(function($query){
+                            $query->where('issue_type', 1)
+                                  ->orWhere(function($query){
+                                    $now = date('Y-m-d');
+                                    $query->where('issue_type', 2)
+                                          ->whereDate('start_date', '<=', $now)
+                                          ->whereDate('end_date', '>=', $now);
+                                  });
+                        })
+                        ->where($table_agent.'.state', $state)//สถานะดำเนินการตามรับมอบ
+                        ->where($table_user.'.block','!=',1)//สถานะการใช้งาน
+                        ->leftJoin($table_user, $table_user.'.id', '=', $table_agent.'.user_id')
+                        ->select($table_user.'.id', $table_user.'.name', $table_user.'.branch_type', $table_user.'.branch_code', $table_user.'.applicanttype_id')
+                        ->get();
+
+        $agents = $agents->keyBy('id');
+
+        return $agents;
+    }
+
+    //ดึงระบบที่ได้รับมอบอำนาจมาจาก user
+    /*
+        $agent_id = sso_agent.agent_id ผู้รับมอบอำนาจ
+        $user_id = sso_agent.user_id ผู้มอบอำนาจ
+        return Collection ([SettingSystem])
+    */
+    static function getAgentSystems($agent_id, $user_id){
+        $agents =  Agent::where('agent_id', $agent_id)
+                        ->where('user_id', $user_id)
+                        ->where(function($query){
+                            $query->where('issue_type', 1)
+                                  ->orWhere(function($query){
+                                    $now = date('Y-m-d');
+                                    $query->where('issue_type', 2)
+                                          ->whereDate('start_date', '<=', $now)
+                                          ->whereDate('end_date', '>=', $now);
+                                  });
+                        })
+                        ->where('state', 2)//ดำเนินการตามรับมอบ
+                        ->orderby('select_all', 'desc')
+                        ->select('id', 'select_all')
+                        ->get();
+
+        $setting_systems = SettingSystem::get()->keyBy('id');
+        $allows = collect([]);
+        foreach ($agents as $agent) {
+            if($agent->select_all==1){//มอบทุกระบบ
+                $allows = $setting_systems;
+                break;
+            }else{
+                $system_ids = AgentSystem::where('sso_agent_id', $agent->id)->pluck('setting_systems_id');//ไอดี ระบบที่มอบอำนาจให้
+                $allow_tmps = $setting_systems->whereIn('id', $system_ids);//get จากระบบที่มีอยู่เพื่อดึงชุดข้อมูลและเช็ค
+                $allows = $allows->merge($allow_tmps)->keyBy('id');//นำมารวมกับของรายการก่อนหน้า
+            }
+        }
+
+        return $allows;
+    }
+
+    static function UserAgentExpire()
+    {
+        $agent = Agent::whereNotIn('state', [99])->Where('issue_type', 2)->Where('state', 2)->whereDate('end_date', '<', date('Y-m-d') )->get();
+
+        foreach( $agent as $item ){
+            if( !empty($item->end_date) ){
+                $item->state = 4;
+                $item->save();
+            }
+        }
+    }
+
+    /* ขนาดไฟล์ที่เซิร์ฟเวอร์อนุญาตให้อัพโหลด
+       return (object)['size' => ขนาดไฟล์หน่วยเป็น KB, 'text' => ข้อความขนาดไฟล์ MB]
+    */
+    static function get_upload_max_filesize(){
+
+        $max  = ini_get('upload_max_filesize');
+        $size = (int)$max * 1024;
+        return (object)['size' => $size, 'text' => $max.'B'];
+
+    }
+
+    private static $data_provinces_lsit;//จังหวัด
+    private static $data_districts_list;//อำเภอ
+    private static $data_sub_districts_lsit;//ตำบล
+    private static $data_zipcode_lsit;//รหัสไปรษณีย์
+    private static $data_district_groups_list;//Group อำเภอ By ID จังหวัด
+    private static $data_sub_district_groups_list;// Group ตำบล By ID อำเภอ
+
+    static function GetIDAddress( $txt_sub = null, $txt_dis = null, $txt_pro = null )
+    {
+        $data = new stdClass;
+
+        if( !empty($txt_sub) && !empty($txt_dis) && !empty($txt_pro)  ){
+
+            $txt_sub = trim($txt_sub);
+            $txt_dis = trim($txt_dis);
+            $txt_pro = trim($txt_pro);
+
+            if( strpos( $txt_sub , "ตำบล" ) === 0 ){
+                $txt_sub =  !empty($txt_sub)?str_replace('ตำบล','',$txt_sub):null;
+            }
+
+            if( strpos( $txt_dis , "อำเภอ/เขต" ) === 0 ){
+                $txt_dis =  !empty($txt_dis)?str_replace('อำเภอ/เขต','',$txt_dis):null;
+            }else if( strpos( $txt_dis , "เขต" ) === 0 ){
+                $txt_dis =  !empty($txt_dis)?str_replace('เขต','',$txt_dis):null;
+            }else if( strpos( $txt_dis , "อำเภอ" ) === 0 ){
+                $txt_dis =  !empty($txt_dis)?str_replace('อำเภอ','',$txt_dis):null;
+            }
+
+            if( strpos( $txt_pro , "จังหวัด" ) === 0 ){
+                $txt_pro =  !empty($txt_pro)?str_replace('จังหวัด','',$txt_pro):null;
+            }
+
+            //จัดหวัด
+            if( !is_array(self::$data_provinces_lsit) ){
+                self::$data_provinces_lsit =  Province::select(DB::raw("TRIM(`PROVINCE_NAME`) AS PROVINCE_NAME"), 'PROVINCE_ID')->pluck( 'PROVINCE_NAME', 'PROVINCE_ID')->toArray();
+            }
+            $provinces = self::$data_provinces_lsit;
+
+            //อำเภอ
+            if( !is_array(self::$data_districts_list) ){
+
+                $districts = District::selectRaw("
+                                                    AMPHUR_ID,
+                                                    IF(POSITION('เขต' IN TRIM(`AMPHUR_NAME`)) = 1,
+                                                        REPLACE(TRIM(`AMPHUR_NAME`), 'เขต', '')
+                                                    ,
+                                                        IF(POSITION('อำเภอ' IN TRIM(`AMPHUR_NAME`)) = 1,
+                                                            REPLACE(TRIM(`AMPHUR_NAME`), 'อำเภอ', '')
+                                                        ,
+                                                            TRIM(`AMPHUR_NAME`)
+                                                        )
+                                                    ) AS AMPHUR_NAME,
+                                                    PROVINCE_ID
+                                                ")
+                                                ->where(DB::raw("REPLACE(AMPHUR_NAME,' ','')"),  'NOT LIKE', "%*%")
+                                                ->get();
+
+                $district_group_tmps = $districts->groupBy('PROVINCE_ID')->toArray();
+
+                $district_groups = [];
+                foreach ($district_group_tmps as $key => $tmp) {
+                    $district_groups[$key] = collect($tmp)->pluck('AMPHUR_NAME', 'AMPHUR_ID')->toArray();
+                }
+                self::$data_districts_list       = $districts->pluck('AMPHUR_NAME', 'AMPHUR_ID')->toArray();
+                self::$data_district_groups_list = $district_groups;
+            }
+            $districts = self::$data_districts_list;
+            $district_groups = self::$data_district_groups_list;
+
+            //ตำบล
+            if( !is_array(self::$data_sub_districts_lsit) ){
+                $sub_districts = Subdistrict::select('DISTRICT_ID', DB::raw("TRIM(`DISTRICT_NAME`) AS DISTRICT_NAME"), 'AMPHUR_ID')->where(DB::raw("REPLACE(DISTRICT_NAME,' ','')"),  'NOT LIKE', "%*%")->get()->makeHidden(['districtname', 'provincename']);
+                $sub_district_group_tmps = collect($sub_districts->toArray())->groupBy('AMPHUR_ID')->toArray();
+                $sub_district_groups     = [];
+                foreach ($sub_district_group_tmps as $key => $tmp) {
+                    $sub_district_groups[$key] = collect($tmp)->pluck('DISTRICT_NAME', 'DISTRICT_ID')->toArray();
+                }
+                self::$data_sub_districts_lsit = $sub_districts->pluck('DISTRICT_NAME', 'DISTRICT_ID')->toArray();
+                self::$data_sub_district_groups_list = $sub_district_groups;
+
+            }
+            $sub_districts = self::$data_sub_districts_lsit;
+            $sub_district_groups = self::$data_sub_district_groups_list;
+
+            //รหัสไปรษณีย์
+            if( !is_array(self::$data_zipcode_lsit) ){
+                self::$data_zipcode_lsit =  DB::table((new Subdistrict)->getTable().' AS sub') // ตำบล
+                                                    ->leftJoin((new Zipcode)->getTable().' AS code', 'code.district_code', '=', 'sub.DISTRICT_CODE')  // รหัสไปรษณีย์
+                                                    ->select('sub.DISTRICT_ID', 'code.zipcode' )
+                                                    ->pluck( 'zipcode', 'DISTRICT_ID')
+                                                    ->toArray();
+            }
+            $zipcode = self::$data_zipcode_lsit;
+
+            $province_ids = array_search($txt_pro, $provinces);
+            $district_ids = array_search($txt_dis, $districts);
+            $subdistrict_ids = array_search( $txt_sub , $sub_districts);
+
+            if($province_ids!==false){
+                $data->province_id = $province_ids;
+            }else{
+                $data->province_id = null;
+            }
+
+            if($province_ids!==false && $district_ids!==false){
+                $district_ids = array_key_exists($province_ids, $district_groups) ? array_search( $txt_dis , $district_groups[ $province_ids ]) : false;
+                $data->district_id = ( $district_ids!==false ? $district_ids : null );
+            }else{
+                $data->district_id = null;
+            }
+
+            if($district_ids!==false && $subdistrict_ids!==false){
+                $subdistrict_ids = array_key_exists($district_ids, $sub_district_groups) ? array_search( $txt_sub , $sub_district_groups[ $district_ids ]) : false;
+                $data->subdistrict_id = ( $subdistrict_ids!==false ? $subdistrict_ids : null );
+            }else{
+                $data->subdistrict_id = null;
+            }
+
+            if( $subdistrict_ids!==false ){
+                $data->zipcode = array_key_exists(  $subdistrict_ids , $zipcode )?$zipcode[ $subdistrict_ids ]:null;
+            }else{
+                $data->zipcode = null;
+            }
+
+        }else{
+            $data->province_id = null;
+            $data->district_id = null;
+            $data->subdistrict_id = null;
+            $data->zipcode = null;
+        }
+
+        return $data;
+    }
+
+    //ประเภทการลงทะเบียน
+    static function applicant_types(){
+        return [
+                '1' => 'นิติบุคคล',
+                '2' => 'บุคคลธรรมดา',
+                '3' => 'คณะบุคคล',
+                '4' => 'ส่วนราชการ',
+                '5' => 'อื่นๆ'
+               ];
+    }
+
+    //ประเภทนิติบุคคล
+    static function juristic_types(){
+        return [
+                '1' => 'บริษัทจำกัด',
+                '2' => 'บริษัทมหาชนจำกัด',
+                '3' => 'ห้างหุ้นส่วนจำกัด',
+                '4' => 'ห้างหุ้นส่วนสามัญนิติบุคคล'
+               ];
+    }
+
+    //ประเภทสาขา
+    static function branch_types(){
+        return [
+                '1' => 'สำนักงานใหญ่',
+                '2' => 'สาขา'
+               ];
+    }
+
+    static function buttonAction($id, $action_url, $controller_action, $str_slug_name, $show_view = true, $show_edit = true, $show_delete = true, $disabled = [])
+    {
+        $form_action = '';
+
+        if( $show_view == true ){
+            $form_action .= '<a href="' . url('/' . $action_url . '/' . $id) . '"title="View ' . substr($str_slug_name, 0, -1) . '" class="btn btn-info btn-xs"><i class="fa fa-eye"></i></a>';
+        }elseif( $show_view == false && in_array( 'view' , $disabled  ) ){
+            $form_action .= '<button class="btn btn-info btn-xs" disabled><i class="fa fa-eye"></i></button>';
+        }
+
+        if( $show_edit == true ){
+            $form_action .= ' <a href="' . url('/' . $action_url . '/' . $id . '/edit') . '" title="Edit ' . substr($str_slug_name, 0, -1) . '" class="btn btn-warning btn-xs"><i class="fa fa-pencil-square-o"></i></a>';
+        }elseif( $show_edit == false && in_array( 'edit' , $disabled  ) ){
+            $form_action .= ' <button class="btn btn-warning btn-xs" disabled><i class="fa fa-pencil-square-o"></i></button>';
+        }
+
+        if( $show_delete == true ){
+            $form_action .= '<form action="' . action($controller_action, ['id' => $id]) . '" method="POST" style="display:inline">' . csrf_field() . method_field('DELETE') . '
+                                <button type="submit" class="btn btn-danger btn-xs" title="Delete ' . substr($str_slug_name, 0, -1) . '" onclick="return confirm_delete()"><i class="fa fa-trash-o" aria-hidden="true"></i></button>
+                            </form>';
+        }elseif( $show_delete == false && in_array( 'delete' , $disabled  ) ){
+            $form_action .= ' <button class="btn btn-danger btn-xs" disabled><i class="fa fa-trash-o"></i></button>';
+        }
+
+
+        return $form_action;
+    }
+
+    static function  replace_address($address,$moo ='',$soi ='',$road ='')
+    {
+        $address =  str_replace("  "," ",$address);
+        $address =  str_replace($moo,"",$address);
+        $address =  str_replace("หมู่ที่","",$address);
+        $address =  str_replace($soi,"",$address);
+        $address =  str_replace("ซอย","",$address);
+        $address =  str_replace($road,"",$address);
+        $address =  str_replace("ถนน","",$address);
+        return $address;
+    }
+
+    static function replace_multi_space($string){//ลบช่องว่างที่อยู่ติดกันให้เหลือเว้นแค่ 1 ช่อง
+
+        replace_space:
+        $string = str_replace('  ', ' ', trim($string));
+        if(mb_strpos($string, '  ')!==false){//ยังมีการช่องว่างมากกว่า 1 ช่องติดกัน
+            goto replace_space;
+        }
+
+        return $string;
+
+    }
+
+    //จัดข้อมูลที่อยู่จาก API นิติบุคคลจาก DBD
+    //$address=Object ที่อยู่
+    static function format_address_company_api($address)
+    {
+
+        $FullAddress = $address->FullAddress;
+
+        $address_no = $building = $floor = $room_no = $village_name = $moo = $soi = $road = null;
+
+        //ค้นหาคู่วงเล็บได้เป็นชุด array
+        $brackets = self::search_brackets($FullAddress);
+
+        //ค้นหาอาคาร
+        $index_building = mb_strpos($FullAddress, 'อาคาร');
+
+        //ค้นหาชั้นที่
+        $index_floor = mb_strpos($FullAddress, 'ชั้นที่');
+
+        //ค้นหาห้องเลขที่
+        $index_room_no = mb_strpos($FullAddress, 'ห้องเลขที่');
+
+        //ค้นหาหมู่บ้าน
+        $index_village_name = mb_strpos($FullAddress, 'หมู่บ้าน');
+
+        //ค้นหาหมู่
+        $index_moo = mb_strpos($FullAddress, 'หมู่ที่');
+
+        //ค้นหาซอย
+        $index_soi = mb_strpos($FullAddress, 'ซอย');
+        $index_soi = self::check_between($index_soi, $brackets)===false ? $index_soi : false ; //ถ้าซอยอยู่ในวงเล็บถือว่าไม่มี
+
+        //ค้นหาถนน
+        $index_road = mb_strpos($FullAddress, 'ถนน');
+        $index_road = self::check_between($index_road, $brackets)===false ? $index_road : false ; //ถ้าถนนอยู่ในวงเล็บถือว่าไม่มี
+
+        //หาเลขที่
+        $address_no = self::cut_string($FullAddress, 0, [$index_moo, $index_soi, $index_road]);
+
+        //หาซอยที่ไม่มีคำว่าซอยนำหน้า
+        if(!empty($address->Soi)){
+            $index_soi_name = mb_strpos($address_no, $address->Soi);
+            if($index_soi===false && $index_soi_name!==false){
+                if($index_building!==false && ($index_soi_name-($index_building+5) <= 1)){//ถ้ามีอาคารและตำแหน่งใกล้กับซอย ให้ไปค้นคำถัดไป
+                    $index_soi_name = mb_strpos($address_no, $address->Soi, ($index_soi_name+1));
+                }
+                if($index_village_name!==false && ($index_soi_name-($index_village_name+7) <= 1)){//ถ้ามีหมู่บ้านและตำแหน่งใกล้กับซอย ให้ไปค้นคำถัดไป
+                    $index_soi_name = mb_strpos($address_no, $address->Soi, ($index_soi_name+1));
+                }
+                $address_no = self::cut_string($address_no, 0, [$index_soi_name]);
+            }
+        }
+
+        //หาถนนที่ไม่มีคำว่าถนนนำหน้า
+        if(!empty($address->Road)){
+            $index_road_name = mb_strpos($address_no, $address->Road);
+            if($index_road===false && $index_road_name!==false){
+                if($index_building!==false && ($index_road_name-($index_building+5) <= 1)){//ถ้ามีอาคารและตำแหน่งใกล้กับซอย ให้ไปค้นคำถัดไป
+                    $index_road_name = mb_strpos($address_no, $address->Road, ($index_road_name+1));
+                }
+                if($index_village_name!==false && ($index_road_name-($index_village_name+7) <= 1)){//ถ้ามีหมู่บ้านและตำแหน่งใกล้กับซอย ให้ไปค้นคำถัดไป
+                    $index_road_name = mb_strpos($address_no, $address->Road, ($index_road_name+1));
+                }
+                $address_no = self::cut_string($address_no, 0, [$index_road_name]);
+            }
+        }
+
+        //หาชื่ออาคาร
+        if($index_building!==false){
+            $building = self::cut_string($FullAddress, $index_building, [$index_floor, $index_room_no, $index_village_name, $index_moo, $index_soi, $index_road]);
+        }
+
+        //หาชื่อชั้น
+        if($index_floor!==false){
+            $floor = self::cut_string($FullAddress, $index_floor, [$index_room_no, $index_village_name, $index_moo, $index_soi, $index_road]);
+        }
+
+        //หาชื่อห้อง
+        if($index_room_no!==false){
+            $room_no = self::cut_string($FullAddress, $index_room_no, [$index_village_name, $index_moo, $index_soi, $index_road]);
+        }
+
+        //หาชื่อหมู่บ้าน
+        if($index_village_name!==false){
+            $village_name = self::cut_string($FullAddress, $index_village_name, [$index_moo, $index_soi, $index_road]);
+        }
+
+        //หาชื่อหมู่ที่
+        if($index_moo!==false){
+            $moo = self::cut_string($FullAddress, $index_moo, [$index_soi, $index_road]);
+            $moo = self::replace_multi_space(mb_substr($moo, mb_strlen('หมู่ที่')));
+
+            //หาตัวแบ่งหมู่ที่เป็นตัวเลขกับข้อความหลังจากนั้น
+            $index_moo_sub = 0;
+            $moos = mb_str_split($moo);
+            foreach ($moos as $key => $moo_str) {
+                if(!is_numeric($moo_str)){
+                    $index_moo_sub = $key;
+                    break;
+                }else{
+                    $index_moo_sub = mb_strlen($moo);
+                }
+            }
+
+            $moo_number = self::cut_string($moo, 0, [$index_moo_sub]);
+
+            if($index_moo_sub!=0){//มีข้อความหลังหมู่
+                $moo_after  = trim(mb_substr($moo, $index_moo_sub));//ข้อความหลังหมู่
+                $address_no = $address_no.' '.$moo_after;//ต่อข้อความไปหลังเลขที่
+            }
+
+            $moo = $moo_number;//หมู่เอาแต่ตัวเลข
+
+        }
+
+        //หาชื่อซอย
+        if($index_soi!==false){
+            $soi = self::cut_string($FullAddress, $index_soi, [$index_road]);
+        }
+
+        //หาชื่อถนน
+        if($index_road!==false){
+            $road = self::cut_string($FullAddress, $index_road, [mb_strlen($FullAddress)]);
+        }
+
+        if((is_null($address->AddressNo) && !is_null($address_no)) || (strlen(trim($address->AddressNo)) > strlen(trim($address_no)) && !is_null($address_no))){//ถ้าเลขที่ในข้อมูลย่อยไม่มีให้เอาไปใส่แทน หรือข้อมูลย่อยยาวกว่า 
+            $address->AddressNo = self::replace_multi_space($address_no); 
+        }
+
+        if(is_null($address->Building) && !is_null($building)){//ถ้าหมู่ที่ในข้อมูลย่อยไม่มีให้เอาไปใส่แทน
+            $address->Building = self::replace_multi_space(mb_substr($building, mb_strlen('อาคาร')));
+        }elseif(!is_null($address->Building)){
+            $address->Building = trim($address->Building);
+            $address->Building = !empty($address->Building) && mb_strpos($address->Building, 'อาคาร')===0 ? trim(mb_substr($address->Building, 5)) : $address->Building ; //ตัดคำว่าอาคาร คำแรกออก
+        }
+
+        if(!empty($moo)){//ถ้าหมู่ที่ในข้อมูลย่อยไม่มีให้เอาไปใส่แทน
+            $address->Moo = $moo;
+        }elseif(!is_null($address->Moo)){
+            $address->Moo = trim($address->Moo);
+            $address->Moo = !empty($address->Moo) && mb_strpos($address->Moo, 'หมู่ที่')===0 ? trim(mb_substr($address->Moo, 7)) : $address->Moo ; //ตัดคำว่าหมู่ที่ คำแรกออก
+            $address->Moo = !empty($address->Moo) && mb_strpos($address->Moo, 'ซอย') !== false ? trim(mb_substr($address->Moo, 0, mb_strpos($address->Moo, 'ซอย'))) : $address->Moo; //ตัดซอยออกถ้ามีรวมอยู่ด้วย
+        }
+
+        if(is_null($address->Soi) && !is_null($soi)){//ถ้าซอยในข้อมูลย่อยไม่มีให้เอาไปใส่แทน
+            $address->Soi = self::replace_multi_space(mb_substr($soi, mb_strlen('ซอย')));
+        }elseif(!is_null($address->Soi)){
+            $address->Soi = trim($address->Soi);
+            $address->Soi = !empty($address->Soi) && mb_strpos($address->Soi, 'ซอย')===0 ? trim(mb_substr($address->Soi, 3)) : $address->Soi ; //ตัดคำว่าซอย คำแรกออก
+        }
+
+        if(is_null($address->Road) && !is_null($road)){//ถ้าถนนในข้อมูลย่อยไม่มีให้เอาไปใส่แทน
+            $address->Road = self::replace_multi_space(mb_substr($road, mb_strlen('ถนน')));
+        }elseif(!is_null($address->Road)){
+            $address->Road = trim($address->Road);
+            $address->Road = !empty($address->Road) && mb_strpos($address->Road, 'ถนน')===0 ? trim(mb_substr($address->Road, 3)) : $address->Road ; //ตัดคำว่าถนน คำแรกออก
+        }
+
+        $address->Tumbol = trim($address->Tumbol);
+        $address->Tumbol = !empty($address->Tumbol) && (mb_strpos($address->Tumbol, 'แขวง')===0 || mb_strpos($address->Tumbol, 'ตำบล')===0) ? trim(mb_substr($address->Tumbol, 4)) : $address->Tumbol ; //ตัดคำว่าตำบล/แขวง คำแรกออก
+
+        $address->Ampur = trim($address->Ampur);
+        $address->Ampur = !empty($address->Ampur) && mb_strpos($address->Ampur, 'อำเภอ')===0 ? trim(mb_substr($address->Ampur, 5)) : $address->Ampur ; //ตัดคำว่าอำเภอ คำแรกออก
+        $address->Ampur = !empty($address->Ampur) && mb_strpos($address->Ampur, 'เขต')===0 ? trim(mb_substr($address->Ampur, 3)) : $address->Ampur ; //ตัดคำว่าเขต คำแรกออก
+
+        //เปลี่ยนข้อมูลเลขที่ใหม่ แบงก์ ปรับปรุง แก้ เอาคำว่า ถนนออก 29/4/2569
+        $address_no_clean = preg_replace('/ถนน[^\s]*/u', '', $address_no); // ตัดคำว่า "ถนน" และชื่อถนนที่ต่อท้ายออกจนเจอช่องว่าง
+        $address->AddressNo = self::replace_multi_space($address_no_clean);
+
+        return $address;
+    }
+
+    static function cut_string($FullAddress, $index_source, $index_compares){
+
+        sort($index_compares);
+
+        $result = null;
+
+        foreach ($index_compares as $key => $index_compare) {
+            if($index_compare!==false){//ถ้าพบข้อมูล
+                $result = mb_substr($FullAddress, $index_source, $index_compare-$index_source);
+                break;
+            }
+        }
+
+        if(is_null($result)){//ถ้าเป็น null แสดงว่าเป็นคำสุดท้ายของ FullAddress
+            $result = mb_substr($FullAddress, $index_source);
+        }
+
+        return $result;
+
+    }
+
+    //หาตำแหน่งคู่วงเล็บในข้อความ ไม่รองรับวงเล็บที่ซ้อนกัน
+    static function search_brackets($input){
+
+        //เก็บตำแหน่งวงเล็บเปิดทั้งหมด
+        $needle = "(";
+        $lastPos = 0;
+        $opens = array();
+
+        while (($lastPos = mb_strpos($input, $needle, $lastPos))!== false) {
+            $opens[] = $lastPos;
+            $lastPos = $lastPos + mb_strlen($needle);
+        }
+
+        //เก็บตำแหน่งวงเล็บปิดทั้งหมด
+        $needle = ")";
+        $lastPos = 0;
+        $closes = array();
+
+        while (($lastPos = mb_strpos($input, $needle, $lastPos))!== false) {
+            $closes[] = $lastPos;
+            $lastPos  = $lastPos + mb_strlen($needle);
+        }
+
+        $results = [];
+        foreach ($opens as $key => $open) {
+            $results[] = (object)['open' => $open, 'close' => $closes[$key]];
+        }
+
+        return $results;
+
+    }
+
+    //เช็ค $index ว่ามีค่าอยู่ระหว่าง $brackets หรือไม่
+    static function check_between($index, $brackets){
+        $result = false;
+        foreach ($brackets as $bracket) {
+            if($index > $bracket->open && $index < $bracket->close){
+                $result = true;
+                break;
+            }
+        }
+        return $result;
+    }
+
+    //จัดข้อมูลที่อยู่จาก API ผู้เสียภาษีจาก RD
+    //$rd=Object ที่ได้จาก API
+    static function format_address_rd_api($rd)
+    {
+        $rd->vName         = $rd->vName=='-'         ? null : self::replace_multi_space($rd->vName) ;
+        $rd->vTitleName    = $rd->vTitleName=='-'    ? null : self::replace_multi_space($rd->vTitleName) ;
+        $rd->vHouseNumber  = $rd->vHouseNumber=='-'  ? null : self::replace_multi_space($rd->vHouseNumber) ;
+        $rd->vBuildingName = $rd->vBuildingName=='-' ? null : self::replace_multi_space($rd->vBuildingName) ;
+        $rd->vFloorNumber  = $rd->vFloorNumber=='-'  ? null : self::replace_multi_space($rd->vFloorNumber) ;
+        $rd->vRoomNumber   = $rd->vRoomNumber=='-'   ? null : self::replace_multi_space($rd->vRoomNumber) ;
+        $rd->vVillageName  = $rd->vVillageName=='-'  ? null : self::replace_multi_space($rd->vVillageName) ;
+        $rd->vMooNumber    = $rd->vMooNumber=='-'    ? null : self::replace_multi_space($rd->vMooNumber) ;
+        $rd->vSoiName      = $rd->vSoiName=='-'      ? null : self::replace_multi_space($rd->vSoiName) ;
+        $rd->vStreetName   = $rd->vStreetName=='-'   ? null : self::replace_multi_space($rd->vStreetName) ;
+        $rd->vThambol      = $rd->vThambol=='-'      ? null : self::replace_multi_space($rd->vThambol) ;
+        $rd->vAmphur       = $rd->vAmphur=='-'       ? null : self::replace_multi_space($rd->vAmphur) ;
+        $rd->vProvince     = $rd->vProvince=='-'     ? null : self::replace_multi_space($rd->vProvince) ;
+
+        //วันที่จดทะเบียนนิติบุคคล
+        $rd->vBusinessFirstDate = str_replace('/', '-', $rd->vBusinessFirstDate);
+        $vBusinessFirstDates    = explode('-', $rd->vBusinessFirstDate);
+        if(count($vBusinessFirstDates)===3){
+            if(strlen($vBusinessFirstDates['0'])===4){ //แบบ ปี-เดือน-วัน
+                $rd->vBusinessFirstDate = $rd->vBusinessFirstDate ;
+            }elseif(strlen($vBusinessFirstDates['2'])===4){ //แบบ วัน-เดือน-ปี หรือ เดือน-วัน-ปี
+                if(in_array($rd->vBranchTitleName, ['ห้างหุ้นส่วนสามัญ', 'สหกรณ์', 'มหาวิทยาลัย', 'โรงเรียน', 'กิจการร่วมค้า']) || (int)$vBusinessFirstDates['1']>12){ //เดือน-วัน-ปี กรณี ห้างหุ้นส่วนสามัญ หรือวัน > 12 คือเดือน
+                    $rd->vBusinessFirstDate = $vBusinessFirstDates['2'].'-'.str_pad($vBusinessFirstDates['0'], 2, "0", STR_PAD_LEFT).'-'.str_pad($vBusinessFirstDates['1'], 2, "0", STR_PAD_LEFT);
+                }else{ //วัน-เดือน-ปี
+                    $rd->vBusinessFirstDate = $vBusinessFirstDates['2'].'-'.$vBusinessFirstDates['1'].'-'.$vBusinessFirstDates['0'];
+                }
+            }
+        }else{
+            $rd->vBusinessFirstDate = null ;
+        }
+
+        if((!is_null($rd->vTitleName) && !is_null($rd->vName)) && mb_strpos($rd->vName, $rd->vTitleName)===false){//ไม่มีคำนำหน้าเติมให้
+            $rd->vName = $rd->vTitleName.$rd->vName;
+        }
+
+        $rd->vHouseNumber = $rd->vHouseNumber.' '.$rd->vBuildingName.' '.$rd->vFloorNumber.' '.$rd->vRoomNumber.' '.$rd->vVillageName;//รวมเป็นฟิลด์เดียว
+        $rd->vHouseNumber = self::replace_multi_space($rd->vHouseNumber);//รวม เลขที่ อาคาร ชั้น ห้อง หมู่บ้าน
+
+        return $rd;
+    }
+
+
+    static function ApplicationStatusIBCB(){
+
+        return [
+                    1 => 'อยู่ระหว่างการตรวจสอบ',
+                    2 => 'เอกสารไม่ครบถ้วน',
+                    3 => 'เอกสารครบถ้วน อยู่ระหว่างตรวจประเมิน',
+                    4 => 'เอกสารครบถ้วน อยู่ระหว่างสรุปรายงาน',
+                    5 => 'ตรวจสอบเอกสารอีกครั้ง',
+                    6 => 'ไม่รับคำขอ/Reject',
+                    7 => 'ไม่ผ่านการตรวจประเมิน',
+                    8 => 'อยู่ระหว่างการพิจารณาอนุมัติ',
+                    9 => 'อนุมัติ อยู่ระหว่างเสนอคณะอนุกรรมการ',
+                    10 => 'ไม่อนุมัติ ตรวจสอบอีกครั้ง',
+                    11 => 'อยู่ระหว่างเสนอ กมอ. และจัดทำประกาศ',
+                    12 => 'ไม่ผ่าน มติคณะอนุกรรมการ',
+                    13 => 'ประกาศราชกิจจาฯ'
+        ];
+
+    }
+
+    static function blur_email($email){//ใส่ * ไปในแทรกไปใน email
+        $result = null;
+        if(filter_var($email, FILTER_VALIDATE_EMAIL)) {
+
+            $emails = explode('@', $email);
+
+            $name_length = ceil(strlen($emails[0])/4);
+            $name_text   = substr($emails[0], 0, strlen($emails[0])-$name_length).str_repeat('*', $name_length);
+
+            $domain_text = $emails[1];
+
+            $result = $name_text.'@'.$domain_text;
+        }
+        return $result;
+    }
+
+
+    static function ConfigFormat( $systems , $table , $column, $application_type = null , $tisi_shortnumber = null, $tisi_number = null   )
+    {
+        $config = ConfigsFormatCode::where( 'system', $systems)->where('state', 1)->first();
+
+        $today = date('Y-m-d');
+        $dates = explode('-', $today);
+
+        $ref_no_run = null;
+
+        $Item_format = [];
+        $year_bf_check = false;
+
+        if( !is_null($config) ){
+
+            $sub = ConfigsFormatCodeSub::where('format_id', $config->id )->select( 'format','data','sub_data' )->get();
+
+            //ข้อมูลเลขรัน
+            $datas_set_no = null;
+            $datas_key_no = null;
+
+            $array_format = [];
+            $strNextSeq = '';
+
+            $json =  (count( $sub ) > 0 )?json_encode( $sub, JSON_UNESCAPED_UNICODE ):null;
+
+            $right_no = false;
+            $right_arr = [];
+            $left_arr = [];
+
+            //วนรูปแบบ
+            foreach( $sub AS $key => $item ){
+
+                $format = $item->format;
+
+                $dataSet = null;
+
+                if( $format == 'character' ){ //อักษรนำ
+                    $dataSet .= !empty($item->data)?$item->data:null;
+                }else if( $format == 'separator' ){ //อักษรคั่น
+                    $dataSet .= !empty($item->data)?$item->data:null;
+                }else if( $format == 'month' ){ //เดือน
+                    $dataSet .= $dates[1];
+                }else if( $format == 'year-be' ){ //ปี พ.ศ.
+
+                    if( $item->data == '4'){
+                        $dataSet = $dates[0] + 543;
+                    }else{
+                        $dataSet = (substr( ($dates[0] + 543) , 2) );
+                    }
+
+                }else if( $format == 'year-bf' ){ //ปี พ.ศ.ตามปีงบประมาณ
+
+                    $yaer  = ( $dates[0] >= 10 )?($dates[0] + 544):($dates[0] + 543);
+
+                    if( $item->data == '4'){
+                        $dataSet = $yaer;
+                    }else{
+                        $dataSet = (substr( $yaer , 2) );
+                    }
+                    $year_bf_check = true;
+                }else if( $format == 'year-ac' ){ //ปี ค.ศ.
+
+                    if( $item->data == '4'){
+                        $dataSet = $dates[0];
+                    }else{
+                        $dataSet = (substr( ($dates[0]) , 2) );
+                    }
+
+                }else if( $format == 'no' ){ //เลขรัน
+
+                    $numbers = !empty($item->data) ?($item->data):0;
+
+                    $number_set = !empty($item->data) && ($item->data >= 2) ?($item->data - 1):0;
+
+                    $zero = str_repeat( '0',  $number_set  );
+
+                    $datas_set_no = $item;
+                    $datas_key_no = $key;
+
+                    $dataSet =  substr( $zero .(1),- $numbers,  $numbers );
+
+                }
+
+                if(  $right_no === true ){
+                    $right_arr[ $format ] = strlen( $dataSet );
+                }
+
+                if( $format == 'tisi_shortnumber' ){ // เลขที่มอก
+                    $dataSet = !empty($tisi_shortnumber)?$tisi_shortnumber:null;
+
+                    $right_no = true;
+
+                }else if( $format == 'tisi_number' ){ //รหัสมาตรฐาน
+                    $dataSet = !empty($tisi_number)?$tisi_number:null;
+
+                    $right_no = true;
+
+                }else if( $format == 'application_type' ){ //ประเภทใบสมัคร
+                    $dataSet = !empty($application_type)?$application_type:null;
+                }
+
+                if( $right_no === false ){
+                    $left_arr[ $format ] = strlen( $dataSet );
+                }
+
+                $dataSet = !empty($dataSet)?str_replace(' ', '', $dataSet):null;
+
+                $item->data_set = $dataSet;
+
+                $array_format[ $key ] = $item;
+
+                $Item_format[ $key ] = (string)$dataSet;
+
+                $strNextSeq .= $dataSet;
+
+            }
+
+            //ถ้ามีเลขรัน format = no
+            if( !is_null($datas_set_no) ){
+
+                $font_search = null;
+                $back_search = null;
+
+                //หาข้อความก่อน เลขรัน
+                foreach( $array_format AS $kf => $Fitem ){
+
+                    if( $Fitem->format != 'tisi_shortnumber' && $Fitem->format != 'tisi_number' ){
+
+                        if( $kf < $datas_key_no ){
+                            $font_search .= $Fitem->data_set;
+                            if( $Fitem->format != 'separator' ){
+                                break;
+                            }
+                        }
+
+                    }
+
+                }
+
+                //หาข้อความหลัง เลขรัน
+                foreach( $array_format AS $kf => $Fitem ){
+
+                    if( $Fitem->format != 'tisi_shortnumber' && $Fitem->format != 'tisi_number' ){
+
+                        if( $kf > $datas_key_no ){
+                            $back_search .= $Fitem->data_set;
+                            if( $Fitem->format != 'separator' ){
+                                break;
+                            }
+
+                        }
+
+                    }
+
+                }
+
+                // หาช่วงการรันต่อ
+                $sub_data = $datas_set_no->sub_data;
+
+                if( $sub_data == 'o'){
+                    $query_check = DB::table( $table )
+                                        ->where(function($query) use($column, $font_search, $back_search ){
+                                            if( !empty($font_search) ){
+                                                $query->where($column, 'LIKE', "%$font_search%");
+                                            }else if( empty($font_search) && !empty($back_search) ){
+                                                $query->where($column, 'LIKE', "%$back_search%");
+                                            }
+                                        })
+                                        ->select($column, 'created_at' )
+                                        ->orderBy($column)
+                                        ->get();
+                }else if( $sub_data == 'm'){
+                    $query_check = DB::table( $table )
+                                        ->select($column, 'created_at' )
+                                        ->where(function($query) use($column, $font_search, $back_search ){
+                                            if( !empty($font_search) ){
+                                                $query->where($column, 'LIKE', "%$font_search%");
+                                            }else if( empty($font_search) && !empty($back_search) ){
+                                                $query->where($column, 'LIKE', "%$back_search%");
+                                            }
+                                        })
+                                        ->where(function($query) use($dates){
+                                            $query->whereYear('created_at',$dates[0])->whereMonth('created_at', $dates[1] );
+                                        })
+                                        ->orderBy($column)
+                                        ->get();
+                }else if( $sub_data == 'y'){
+                    $query_check = DB::table( $table )
+                                        ->select($column, 'created_at' )
+                                        ->where(function($query) use($column, $font_search, $back_search ){
+                                            if( !empty($font_search) ){
+                                                $query->where($column, 'LIKE', "%$font_search%");
+                                            }else if( empty($font_search) && !empty($back_search) ){
+                                                $query->where($column, 'LIKE', "%$back_search%");
+                                            }
+                                        })
+                                        ->where(function($query) use($dates, $year_bf_check){
+                                            if( $year_bf_check == false ){ // ตามปี
+                                                $query->whereYear('created_at',$dates[0]);
+                                            }else{ // ตามปีงบ
+                                                $startDate = \Carbon\Carbon::parse( $dates[0].'-10-01' )->format('Y-m-d');
+                                                $endDate   = \Carbon\Carbon::parse( $dates[0].'-09-30' )->addYears(1)->format('Y-m-d');
+                                                $query->whereDate('created_at', '>=', $startDate)->whereDate('created_at', '<=', $endDate);
+                                            }
+                                        })
+                                        ->orderBy($column)
+                                        ->get();
+                }
+
+                $numbers = !empty($datas_set_no->data) ?($datas_set_no->data):0;
+
+                $number_set = !empty($datas_set_no->data) && ($datas_set_no->data >= 2) ?($datas_set_no->data - 1):0; //จำนวนหลักเฉพาะเลขรัน ที่ -1
+
+                $number_search = !empty($datas_set_no->data)?$datas_set_no->data:0; //จำนวนหลักเฉพาะเลขรัน
+
+                $zero = str_repeat( '0',  $number_set  );
+
+                $query = 0;
+                if(count($query_check) != 0){
+
+                    $last_data = $query_check->last();
+
+                    $checks_state = false;
+
+                    $log_old = ConfigsFormatCodeLog::where('format_id', $config->id )
+                                                    ->where( 'system', $systems)
+                                                    ->select('data', 'start_date', 'end_date', 'state')
+                                                    ->get();
+                    foreach( $log_old AS $old ){
+
+                        //หา Format ที่ใช้งาน ก่อนหน้าว่ารูปแบบตรงกันไหม
+                        if( mb_strpos($old->data, $json ) !== false  ){
+
+                            //หาจากช่วงวันที่ จากใบก่อนหน้า
+                            if( !is_null($old->end_date) && ( $last_data->created_at >= $old->start_date) && ( $last_data->created_at <= $old->end_date) ){
+                                $checks_state = true;
+                                break;
+                            }else if( ( $last_data->created_at >= $old->start_date ) && is_null($old->end_date) ){ //หาจากช่วงวันที่ จากก่อนหน้า ที่ใช้งานปัจจุบัน
+                                $checks_state = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Format ที่ใช้งาน
+                    if( $checks_state === true ){
+
+                        $_no =  $last_data->{$column};
+                        $_no = !empty($_no)?str_replace(' ', '', $_no):null;
+
+                        $_arr_format = [];
+
+                        if( $right_no === true){
+                            $sum = array_sum($right_arr);
+                            $suc_string = mb_substr($_no,  - $sum ,  $sum );
+                            $_arr_format = $right_arr;
+
+                        }else{
+
+                            $sum = array_sum($left_arr);
+                            $suc_string = mb_substr($_no,  - $sum ,  $sum );
+                            $_arr_format = $left_arr;
+                        }
+
+                        foreach(  $_arr_format AS $ka => $Atiem  ){
+
+                            if( $ka == 'no' ){
+
+                                $next = next( $_arr_format ) === false ? strlen($suc_string):$Atiem;
+
+                                $suc_string = mb_substr( $suc_string , 0,  $next );
+                                break;
+                            }
+                            $suc_string = mb_substr( $suc_string , $Atiem  );
+
+                        }
+
+                        $Max = str_repeat( '9',  $number_search  ); //ค่า MAX ของเลขรัน
+                        $check_number_max = ($Max == $suc_string)?( $suc_string + 1 ):$suc_string; //เช็คว่าเกินค่า Max หรือยัง
+
+                        if( mb_strlen( $check_number_max  ) > (int)$numbers ){ //กรณีที่รันเกินจำนวนหลักเลขรัน
+                            $Seq_max = substr( $zero .( (int)$suc_string + 1 ),- $numbers,  $numbers );
+                            $Seq = ( $check_number_max ) + (int)$Seq_max;
+
+                        }else{
+                            $Seq = substr( $zero .( (int)$suc_string + 1 ),- $numbers,  $numbers );
+                        }
+
+                    }else{
+                        $Seq = substr( $zero .(1),- $numbers,  $numbers );
+                    }
+
+                }else{
+                    $Seq = substr( $zero .(1),- $numbers,  $numbers );
+                }
+
+                $Item_format[ $datas_key_no ]=  $Seq;
+                $check_run = implode('', $Item_format );
+
+                $no_check = DB::table( $table )->where($column, $check_run )->first();
+                if(is_null($no_check)){
+                    $Item_format[ $datas_key_no ]=  $Seq;
+                }else{
+                    $Seq = substr( $zero .( (int)$Seq + 1 ),- $numbers,  $numbers );
+                    $Item_format[ $datas_key_no ]=  $Seq;
+                }
+            }
+
+        }
+
+        return implode('', $Item_format );
+    }
+
+    static function getJuristic($JuristicID, $ip, $request_id=null)
+    {//รับค่า $JuristicID=เลขทะเบียนพาณิชน์ที่ต้องการทราบข้อมูล
+
+        $response = (object)[];
+
+        $config = HP::getConfig();
+
+        $url = $config->tisi_api_corporation_url; //'https://www3.tisi.go.th/moiapi/srv.asp?pid=1';
+        $data = array(
+                'val' => $JuristicID,
+                'IP' => $ip, // IP Address,
+                'Refer' => 'sso.tisi.go.th'
+                );
+        $options = array(
+                'http' => array(
+                    'header'  => "Content-type: application/x-www-form-urlencoded",
+                    'method'  => 'POST',
+                    'content' => http_build_query($data),
+                    'timeout' => 30
+                )
+        );
+        if(strpos($url, 'https')===0){//ถ้าเป็น https
+            $options["ssl"] = array(
+                                    "verify_peer" => false,
+                                    "verify_peer_name" => false,
+                              );
+        }
+        $context = stream_context_create($options);
+        $request_start = date('Y-m-d H:i:s');
+        $api = null ;
+
+        try {
+            $json_data = file_get_contents($url, false, $context);
+            if ($json_data === false) {
+                throw new \RuntimeException('DBD API returned no response');
+            }
+
+            $api = json_decode($json_data);
+            if (!is_object($api)) {
+                throw new \RuntimeException('DBD API returned invalid JSON');
+            }
+
+            $response = $api;
+            if(!empty($api->JuristicName_TH)){
+                $response->status = 'success';
+            }elseif(!empty($api->Message)){
+                $response->Result = $api->Message;
+                $response->status = 'fail';
+            }else{
+                $response->status = 'fail';
+            }
+        } catch (\Throwable $e) {
+            // Do not let an unavailable/malformed DBD response become an HTTP 500.
+            $api = null;
+            $response = (object) ['status' => 'no-connect'];
+            Log::warning('DBD corporation API unavailable', [
+                'url' => $url,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        //บันทึก Log
+        MOILog::Add($JuristicID, $url, 'corporation', $request_start, @$http_response_header, ($response->status!='success' ? $api : null), $request_id);
+
+        return $response;
+
+    }
+
+    static function getPersonal($PersonalID, $ip)
+    {//รับค่า $PersonalID=เลขประจำตัวประชาชนที่ต้องการทราบข้อมูล
+
+        $person = null;
+
+        $config = HP::getConfig();
+
+        $url = $config->tisi_api_person_url; //'https://www3.tisi.go.th/moiapi/srv.asp?pid=2';
+        $data = array(
+                'val'   => $PersonalID,
+                'IP'    => $ip,
+                'Refer' => 'sso.tisi.go.th'
+                );
+        $options = array(
+                'http' => array(
+                    'header'  => "Content-type: application/x-www-form-urlencoded",
+                    'method'  => 'POST',
+                    'content' => http_build_query($data),
+                    'timeout' => 30
+                )
+        );
+        if(strpos($url, 'https')===0){//ถ้าเป็น https
+            $options["ssl"] = array(
+                                    "verify_peer" => false,
+                                    "verify_peer_name" => false,
+                              );
+        }
+        $context  = stream_context_create($options);
+        $request_start = date('Y-m-d H:i:s');
+        $api = null ;
+
+        try {
+            $json_data = file_get_contents($url, false, $context);
+            $api = json_decode($json_data);
+            $person = $api;
+            if(!empty($api->firstName)){
+                $person->status = 'success';
+            }else{
+                $person->status = 'fail';
+            }
+        } catch (\Exception $e) {
+            $person         = (object)[];
+            $person->status = 'no-connect';
+        }
+
+        //บันทึก Log
+        MOILog::Add($PersonalID, $url, 'person', $request_start, @$http_response_header, ($person->status!='success' ? $api : null));
+
+        return $person;
+
+    }
+
+    /**
+     * ดึงที่อยู่ตามทะเบียนบ้านจาก API ทะเบียนราษฎร์ (srv.asp?pid=3) ด้วยเลขบัตร ปชช. 13 หลัก
+     * สกัดมาจาก RegisterController::datatype() เดิม (เดิมเรียกซ้ำจากที่อื่นไม่ได้เพราะฝัง
+     * inline อยู่ในนั้นตรงๆ) - ใช้ตอนสมัครสมาชิก และใช้ตอนดึงที่อยู่ให้บัญชีเก่าที่ auto-login
+     * ผ่าน ThaiD/i-industry มาแล้วแต่ข้อมูลที่อยู่ไม่ครบ (ProfileController::show())
+     *
+     * คืนค่า array เสมอ (ไม่ null) - ทุก key เป็น '' ถ้าดึงไม่สำเร็จ/ไม่พบข้อมูล ให้ caller
+     * เช็คจาก key ใดก็ได้ว่างหมดหรือไม่เพื่อรู้ว่าดึงสำเร็จหรือเปล่า
+     */
+    static function getHouseAddress($tax_id, $ip)
+    {
+        $response = [
+            'address'  => '', 'building' => '', 'moo'      => '', 'soi'      => '',
+            'road'     => '', 'tumbol'   => '', 'ampur'    => '', 'province' => '',
+            'zipcode'  => '',
+        ];
+
+        $config = self::getConfig();
+        $url    = $config->tisi_api_house_url; //'https://www3.tisi.go.th/moiapi/srv.asp?pid=3'
+        $data   = array(
+            'val'   => $tax_id,
+            'IP'    => $ip,
+            'Refer' => 'sso.tisi.go.th',
+        );
+        $options = array(
+            'http' => array(
+                'header'  => "Content-type: application/x-www-form-urlencoded",
+                'method'  => 'POST',
+                'content' => http_build_query($data),
+                'timeout' => 10,
+            ),
+        );
+        if (strpos($url, 'https') === 0) {
+            $options['ssl'] = array('verify_peer' => false, 'verify_peer_name' => false);
+        }
+        $context       = stream_context_create($options);
+        $request_start = date('Y-m-d H:i:s');
+        $address       = null;
+
+        try {
+            $json_data = file_get_contents($url, false, $context);
+            if ($json_data === false || trim($json_data) === '') {
+                throw new \RuntimeException('House address API returned an empty response.');
+            }
+            $address = json_decode($json_data);
+            if (json_last_error() !== JSON_ERROR_NONE || !is_object($address)) {
+                throw new \RuntimeException('House address API returned invalid JSON.');
+            }
+        } catch (\Throwable $e) {
+            MOILog::Add($tax_id, $url, 'person-house', $request_start, @$http_response_header, null);
+            return $response;
+        }
+
+        if (!empty($address->houseNo)) {
+            $response['address']  = $address->houseNo       ?? '';
+            $response['moo']      = $address->villageNo     ?? '';
+            $response['soi']      = $address->alleyDesc      ?? '';
+            $response['road']     = $address->roadDesc       ?? '';
+            $response['tumbol']   = $address->subdistrictDesc ?? '';
+            $response['ampur']    = $address->districtDesc    ?? '';
+            $response['province'] = $address->provinceDesc    ?? '';
+
+            list($response['moo'], $response['soi'], $response['road'], $response['tumbol'], $response['ampur'])
+                = self::stripAddressPrefix($response['moo'], $response['soi'], $response['road'], $response['tumbol'], $response['ampur']);
+
+            $zipcode = self::getZipcode($address->subdistrictDesc, $address->districtDesc, $address->provinceDesc);
+            $response['zipcode'] = $zipcode ?: '';
+
+            $response['address'] = self::FormatToNull($response['address']) ?? '';
+            $response['moo']     = self::FormatToNull($response['moo'])     ?? '';
+            $response['soi']     = self::FormatToNull($response['soi'])     ?? '';
+            $response['road']    = self::FormatToNull($response['road'])    ?? '';
+        }
+
+        //บันทึก Log
+        MOILog::Add($tax_id, $url, 'person-house', $request_start, @$http_response_header, (empty($address->houseNo) ? $address : null));
+
+        return $response;
+    }
+
+    /**
+     * ตัดคำนำหน้า (หมู่/ซอย/ถนน/ตำบล-แขวง/อำเภอ-เขต) ออกจากค่าที่ API ทะเบียนราษฎร์ตอบกลับมา
+     * เพราะ field ในฟอร์มเราเก็บแค่ค่า ไม่รวมคำนำหน้าซ้ำกับ label - สกัดมาจาก
+     * RegisterController::replace_prefix() เดิม (private, เรียกจากที่อื่นไม่ได้)
+     */
+    static function stripAddressPrefix($moo, $soi, $road, $tumbol, $ampur)
+    {
+        $address_moo = trim($moo);
+        $moo         = !empty($address_moo) && mb_strpos($address_moo, 'หมู่') === 0 ? trim(mb_substr($address_moo, 4)) : $address_moo;
+
+        $address_soi = trim($soi);
+        $soi         = !empty($address_soi) && mb_strpos($address_soi, 'ซอย') === 0 ? trim(mb_substr($address_soi, 3)) : $address_soi;
+
+        $address_road = trim($road);
+        $road         = !empty($address_road) && mb_strpos($address_road, 'ถนน') === 0 ? trim(mb_substr($address_road, 3)) : $address_road;
+
+        $address_tumbol = trim($tumbol);
+        $tumbol         = !empty($address_tumbol) && (mb_strpos($address_tumbol, 'แขวง') === 0 || mb_strpos($address_tumbol, 'ตำบล') === 0) ? trim(mb_substr($address_tumbol, 4)) : $address_tumbol;
+
+        $address_ampur = trim($ampur);
+        $address_ampur = !empty($address_ampur) && mb_strpos($address_ampur, 'อำเภอ') === 0 ? trim(mb_substr($address_ampur, 5)) : $address_ampur;
+        $ampur         = !empty($address_ampur) && mb_strpos($address_ampur, 'เขต') === 0 ? trim(mb_substr($address_ampur, 3)) : $address_ampur;
+
+        return [$moo, $soi, $road, $tumbol, $ampur];
+    }
+
+    //ดึงข้อมูลจากกรมสรรพากร
+    static function getRdVat($JuristicID, $ip){//รับค่า $JuristicID=เลขประจำตัวผู้เสียภาษีที่ต้องการทราบข้อมูล
+
+        $response = null;
+
+        $config = HP::getConfig();
+
+        $url = $config->tisi_api_faculty_url; //'https://www3.tisi.go.th/moiapi/srv.asp?pid=5';
+        $data = array(
+                'val' => $JuristicID,
+                'IP' => $ip, // IP Address,
+                'Refer' => 'sso.tisi.go.th'
+                );
+        $options = array(
+                'http' => array(
+                    'header'  => "Content-type: application/x-www-form-urlencoded",
+                    'method'  => 'POST',
+                    'content' => http_build_query($data),
+                    'timeout' => 30
+                )
+        );
+        if(strpos($url, 'https')===0){//ถ้าเป็น https
+            $options["ssl"] = array(
+                                    "verify_peer" => false,
+                                    "verify_peer_name" => false,
+                              );
+        }
+        $context = stream_context_create($options);
+        $request_start = date('Y-m-d H:i:s');
+        $api = null ;
+
+        try {
+            $json_data = @file_get_contents($url, false, $context);
+            if ($json_data === false || trim($json_data) === '') {
+                throw new \RuntimeException('RD API returned an empty response.');
+            }
+            $api = json_decode($json_data);
+            if (json_last_error() !== JSON_ERROR_NONE || !is_object($api)) {
+                throw new \RuntimeException('RD API returned invalid JSON.');
+            }
+            $response = $api;
+            if(empty($api->vMessageErr)){
+                $response->status = 'success';
+            }else{
+                $response->status = 'fail';
+            }
+        } catch (\Throwable $e) {
+            $api = [
+                'error' => get_class($e),
+                'message' => $e->getMessage(),
+            ];
+            $response         = (object)[];
+            $response->status = 'no-connect';
+        }
+
+        //บันทึก Log
+        MOILog::Add($JuristicID, $url, 'rd', $request_start, @$http_response_header, ($response->status!='success' ? $api : null));
+
+        return $response;
+
+    }
+
+    //ลบตัวอักษรบางตัวออก
+    static function replace_html($input){
+        $input = str_replace("'", '', $input);
+        $input = str_replace('"', '', $input);
+        $input = str_replace('<', '', $input);
+        $input = str_replace('>', '', $input);
+        $input = str_replace('[', '', $input);
+        $input = str_replace(']', '', $input);
+        return $input;
+    }
+
+    public static function dateTimeFormatN($date)
+    {//$date format d/m/Y OR d/m/Y H.i น.
+
+        $dates = explode('-', $date);
+        if (count($dates) != 3) {
+            return '-';
+        }
+
+        $time = explode(' ', $date);
+        $times = isset($time[1])?$time[1]:null;
+        if(!is_null($times)){
+            $times       = explode(':', $times);
+            $time_string = $times[0].'.'.$times[1].' น.';
+        }else{
+            $time_string = '';
+        }
+
+        $year = ($dates[0] + 543);
+
+        return substr($dates[2], 0, 2) . '/' . $dates[1] . '/' . $year.' '.$time_string;
+    }
+
+
+    public static function LogInsertNotification( $ref_id, $ref_table, $raf_app_no, $status, $title, $detail, $url , $users_id , $type = 1 )
+    {
+
+        $check = LogNotification::where('ref_table', $ref_table )->where('ref_id', $ref_id )->where('ref_id', $ref_id )->select('status')->orderBy('id', 'desc')->first();
+
+        if( $type == 1 ){
+
+            if( is_null($check) || ( !is_null($check) && ( $check->status  != $status  )) ){
+
+                $log = array();
+
+                $log['title'] = !empty($title)?$title:null;
+                $log['details'] = !empty($detail)?$detail:null;
+
+                $log['ref_applition_no'] = !empty($raf_app_no)?$raf_app_no:null;
+                $log['ref_table'] = !empty($ref_table)?$ref_table:null;
+                $log['ref_id'] = !empty($ref_id)?$ref_id:null;
+                $log['status'] = !empty($status)?$status:null;
+
+                $log['site'] = 'center';
+                $log['root_site'] = url('/');
+                $log['url'] = !empty($url)?$url:null;
+
+                $log['users_id'] = !empty($users_id)?$users_id:null;
+
+                $log['type'] = !empty($type)?$type:null;
+
+                $log['ref_table_user'] = (new User)->getTable() ;
+
+                LogNotification::create($log);
+            }
+
+        }
+
+    }
+
+    //เช็คข้อมูลเป็นตัวเลขทั้งหมดหรือไม่ ครบ 13 หลักหรือไม่
+    static function check_number_counter($input, $counter=13){
+        $converted = preg_replace("/[^0-9]/", '', $input);
+        return $converted===$input && strlen($input)===$counter ? true : false;
+    }
+
+    //แปลง 0 หรือ - หรือ empty เป็น null
+    static function FormatToNull($input){
+        return ($input==='0' || $input===0 || $input==='-' || $input==='') ? null : $input ;
+    }
+
+    //สถานะ product-testing-surveillance (save_example_map_lap.status) - ให้ label ตรงกับ dropdown filter ในหน้า index
+    //ข้อมูลเก่าบางแถวเป็น '0', '-', 'ยกเลิก', null (คนละ scheme กับตัวเลข 1-6 ที่ใช้ปัจจุบัน) จึง fallback เป็น '-' เหมือนระบบ product-testing ที่ไม่มีปัญหา
+    static function Section5StatusProductTesting($status){
+        $status_list = [
+            '1' => '<span class="label label-warning">รอการตอบรับ</span>',
+            '2' => '<span class="label label-info">รับคำขอ</span>',
+            '3' => '<span class="label label-danger">ไม่รับคำขอ</span>',
+            '4' => '<span class="label label-primary">อยู่ระหว่างการทดสอบ</span>',
+            '5' => '<span class="label label-info">แจ้งผล</span>',
+            '6' => '<span class="label label-success">สรุปผล</span>',
+            'ยกเลิก' => '<span class="label label-default">ยกเลิก</span>',
+        ];
+        return $status_list[(string)$status] ?? '-';
+    }
+
+    //สถานะการส่งตัวอย่าง (save_example_map_lap.status_send)
+    static function map_lap_status($status_send){
+        $status_list = [
+            'ส่ง' => '<span class="label label-success">ส่ง</span>',
+            'รอ' => '<span class="label label-warning">รอ</span>',
+            'ปฏิเสธ' => '<span class="label label-danger">ปฏิเสธ</span>',
+        ];
+        return $status_list[(string)$status_send] ?? '-';
+    }
+
+}

@@ -1,0 +1,29 @@
+{
+    "menus": [
+        {
+            "section": "ติดตามคำขอทดสอบผลิตภัณฑ์",
+            "_comment": "ระบบติดตามคำขอทดสอบผลิตภัณฑ์สำหรับผู้ประกอบการ",
+            "items": [
+                {
+                    "title": "product-testing",
+                    "display": "ติดตามคำขอทดสอบผลิตภัณฑ์",
+                    "icon": "mdi mdi-test-tube",
+                    "sub_menus": [
+                        {
+                            "title": "product-testing-elicense",
+                            "display": "คำขอทดสอบผลิตภัณฑ์ E-license",
+                            "icon": "mdi mdi-test-tube",
+                            "url": "section5\/product-testing?type=elicense"
+                        },
+                        {
+                            "title": "product-testing-esurveillance",
+                            "display": "คำขอทดสอบผลิตภัณฑ์ E-surveillance",
+                            "icon": "mdi mdi-test-tube",
+                            "url": "section5\/product-testing-surveillance"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
